@@ -3,28 +3,6 @@
 '  Boriel ZX BASIC:
 '    zxbc ROLEZX.BAS -O 3 --array-base 0 --string-base 0 --explicit
 '
-'  v12: esfera a pantalla completa (radio 94 sobre 192 de alto), agujas
-'       mas largas, ROLEZX y la fecha en tamano doble (fuente de la ROM
-'       ampliada x2).
-'  v11: tablas de agujas en Byte (la mitad de memoria, indexado mas
-'       rapido) y un solo contador de pasos en vez de dos.
-'
-'  Cambios respecto a v9:
-'   * CORREGIDO: PLOT/DRAW tienen el eje Y hacia ARRIBA, pero la
-'     esfera y las agujas usaban "cy - r*COS": todo salia reflejado
-'     (las 12 abajo, agujas girando al reves). Ahora es cy + r*COS.
-'   * CORREGIDO: la fecha (PRINT AT, fila desde ARRIBA) caia en la
-'     fila 11 y el marco (PLOT, Y desde ABAJO) en la fila 12.
-'     Ahora ambos estan en la fila 12.
-'   * Sin Float/Long/INT en el bucle: el tiempo son contadores
-'     enteros y las agujas salen de tablas precalculadas (300
-'     posiciones = 1.2 grados). Cero trigonometria en marcha.
-'   * HALT en el bucle: la CPU descansa hasta la siguiente
-'     interrupcion (FRAMES) y solo se dibuja cuando hay cambio.
-'   * Fecha sin POKE de atributos: ventana en INVERSE, con los
-'     mismos atributos que toda la esfera.
-'   * Esfera: un solo SIN/COS por marca, batones incluidos (antes
-'     8 llamadas SIN/COS por marca).
 ' ************************************************************
 
 #define cx      128

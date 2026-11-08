@@ -1,50 +1,28 @@
 ' ************************************************************
-'  ROLEZX v18.1 - Reloj analógico estilo Rolex Datejust
+'  ROLEZX v20 - Reloj analógico estilo Rolex Datejust
 '  (Boriel ZX BASIC para ZX Spectrum 48K, 50 Hz)
 ' ************************************************************
-'  CAMBIOS v18 (corrección + simplificación + optimización):
+'  CAMBIOS v20 (revisión a fondo + simplificación):
 '
-'   * CORREGIDO EL SALTO DEL SEGUNDO 60: si, mi y hi ya NO son
-'     contadores con incremento y wrap propio (si = si + 1 :
-'     IF si = 300 THEN si = 0). Ahora se DERIVAN en cada paso de
-'     un contador maestro `pasos` (ULong, 1 paso = 0.2 s) con
-'     divisiones de 32 bits. Con el esquema antiguo, el primer
-'     valor que alcanzaba 300 quedaba truncado a 8 bits en el
-'     binario de algunas versiones del compilador y el wrap
-'     nunca se detectaba: 300 mod 256 = 44 pasos = segundo 8.8,
-'     exactamente el salto observado. Con el nuevo esquema el
-'     valor 300 jamás se almacena en una variable: el índice se
-'     CALCULA cada paso, así que el truncamiento es imposible.
-'   * Delta de FRAMES explícitamente modular:
-'     d = (nb - pl) BAND 255. Funciona sea cual sea la promoción
-'     de tipos que aplique el compilador a la resta de UByte.
-'   * SIMPLIFICADO: fuera t, sc y m12. El minutero y el horario
-'     se mueven cuando su índice derivado cambia; medianoche y
-'     fusión triple se detectan con el mismo criterio que antes.
-'   * HORA INICIAL EXACTA: antes hi = t / 144 truncaba la parte
-'     decimal (hasta 2.4 min de error); ahora todo sale del
-'     contador maestro sin perder nada.
-'
-'  CAMBIOS v18.1 (todo el ASM fuera):
-'
-'   * SIN UNA SOLA INSTRUCCIÓN ASM: retirados el beeper en
-'     ensamblador y los bloques ei/halt. El tic-tac vuelve al
-'     BEEP de la ROM (0.008 s, tono alterno) y la sincronía de
-'     refresco se hace con el propio FRAMES: el bucle gira
-'     libre y solo actúa cuando FRAMES (23672) salta. Como la
-'     ULA lo incrementa al comenzar el VBLANK, el dibujo sigue
-'     alineado al refresco igual que con halt. (El BEEP de la
-'     ROM hace DI unos 8 ms, pero la ULA mantiene la INT
-'     pendiente hasta atenderla: no se pierde ningún tick y el
-'     delta de FRAMES compensa solo.)
-'   * CORREGIDO EL ERROR DE COMPILACIÓN: en la v18 quedó
-'     `DIM pm ... = PM0` sin su `#define PM0 0` (borrado al
-'     simplificar), de ahí el "Undeclared variable PM0" en el
-'     modo estricto. Ahora: DIM pm as UByte = 0.
-'   * SE CONSERVA INTACTO: esfera, ventana de fecha enmascarada
-'     con OVER 1, reparación de la fusión triple de las 12
-'     (rep/hp de v17.4), dibujado de la aguja nueva antes de
-'     borrar la vieja y salida por teclado con IN 254.
+'   * ERROR CORREGIDO EN LAS TABLAS DE AGUJAS: `i` era UByte, así
+'     que `i + 225` se evaluaba en 8 bits (para i >= 31 daba
+'     256..299 -> 0..43). El 4º cuadrante (índices 225..299) quedaba
+'     a medias (256..299 = 0,0) y además machacaba los índices
+'     0..43 del 1º cuadrante: de ahí el salto hacia el segundo 8.8
+'     (paso 44). Ahora `i` es UInteger.
+'   * SIN CONTADOR MAESTRO ULong: segundero, minutero y horario son
+'     contadores UInteger con su propio wrap (sin divisiones de
+'     32 bits ni MOD en el bucle). Los valores iniciales salen de
+'     T0 en tiempo de compilación.
+'   * TIC-TAC SIN BEEP: el BEEP de la ROM deja las interrupciones
+'     desactivadas durante el tono; si el INT del ULA (pulso de
+'     32 T) cae ahí se pierde un frame y el reloj se atrasa. Ahora
+'     es un pulso OUT 254 sin DI, de ancho alterno (toc).
+'   * Condiciones explícitas (<> 0) para el modo estricto.
+'   * drawDate: ventana de fecha en un solo bucle (el marco 1 px
+'     era del mismo color que el relleno).
+'   * Fusión de las 12: se arma directamente al envolver el
+'     horario (siempre coincide con si = 0 y mi = 0).
 ' ************************************************************
 
 #define cx      128
@@ -77,12 +55,12 @@ SUB bigChar(x as UByte, yt as UByte, ch as UByte)
   adr = 15360 + CAST(UInteger, ch) * 8
   FOR r = 0 TO 7
     b = PEEK(adr + r)
-    IF b THEN
+    IF b <> 0 THEN
       m = 128
       px = x
       py = 191 - yt - r - r
       FOR c = 0 TO 7
-        IF b BAND m THEN
+        IF (b BAND m) <> 0 THEN
           PLOT px, py : PLOT px + 1, py
           PLOT px, py - 1 : PLOT px + 1, py - 1
         END IF
@@ -102,8 +80,8 @@ SUB drawDate(n as UByte)
   DIM yy as UByte
   OVER 0
   INK 6
-  FOR yy = 100 TO 115
-    PLOT 151, yy : DRAW 33, 0
+  FOR yy = 99 TO 116
+    PLOT 150, yy : DRAW 35, 0
   NEXT yy
   OVER 1
   IF n < 10 THEN
@@ -112,10 +90,6 @@ SUB drawDate(n as UByte)
     bigChar(152, 76, 48 + n / 10)
     bigChar(168, 76, 48 + n MOD 10)
   END IF
-  OVER 0
-  PLOT 150, 99 : DRAW 35, 0
-  DRAW 0, 17 : DRAW -35, 0 : DRAW 0, -17
-  OVER 1
 END SUB
 
 ' ------------------------------------------------------------
@@ -153,9 +127,10 @@ SUB drawFace()
     PLOT cx + 0.5 + (rOuter - 2) * s, cy + 0.5 + (rOuter - 2) * c
     DRAW 4 * s, 4 * c
 
+    r = 58
     IF n MOD 5 = 0 THEN
       r = 54
-      IF n THEN
+      IF n <> 0 THEN
         ' Batón triple (en el 12 se omite: chocaría con la corona)
         FOR q = -1 TO 1
           a = q * 0.02
@@ -165,8 +140,6 @@ SUB drawFace()
           DRAW 8 * b, 8 * a
         NEXT q
       END IF
-    ELSE
-      r = 58
     END IF
     PLOT cx + 0.5 + r * s, cy + 0.5 + r * c
     DRAW (rOuter - 8 - r) * s, (rOuter - 8 - r) * c
@@ -190,11 +163,12 @@ END SUB
 ' ------------------------------------------------------------
 ' Tablas de agujas 2D: 0 = hora, 1 = minuto, 2 = segundo
 ' 300 pasos/vuelta. Un solo bucle genera los 4 cuadrantes.
+' OJO: `i` debe ser UInteger (i + 225 llega a 299).
 ' ------------------------------------------------------------
 DIM ax(2, 299) as Byte
 DIM ay(2, 299) as Byte
 
-DIM i   as UByte
+DIM i   as UInteger
 DIM h   as UByte
 DIM ang as Float
 DIM sn  as Float
@@ -219,27 +193,29 @@ FOR i = 0 TO 74
 NEXT i
 
 ' ------------------------------------------------------------
-' Estado del reloj: UN contador maestro de pasos.
+' Estado del reloj (todo sale de T0 en compilación)
 '   1 paso = 0.2 s (5 pasos/s).  300 pasos = 1 vuelta (60 s)
-'   segundero: si = pasos MOD 300
-'   minutero : 1 paso suyo cada 60 pasos (12 s)
-'   horario  : 1 paso suyo cada 720 pasos (144 s = 2.4 min)
-'   12 h = 216000 pasos -> pm cambia; 24 h = 432000 -> cambia el día
+'   si: segundero 0..299, un paso cada paso
+'   mi: minutero  0..299, un paso cada 60 pasos (km cuenta 0..59)
+'   hi: horario   0..299, un paso cada 12 del minutero (kh 0..11)
+'   hi envuelve cada 12 h -> cambia pm; pm vuelve a 0 -> nuevo día
 ' ------------------------------------------------------------
-DIM pasos as ULong = CAST(ULong, T0) * 5
-DIM si as UInteger = CAST(UInteger, pasos MOD 300)
-DIM mi as UInteger = CAST(UInteger, (pasos / 60) MOD 300)
-DIM hi as UInteger = CAST(UInteger, (pasos / 720) MOD 300)
+DIM si as UInteger = CAST(UInteger, (T0 MOD 60) * 5)
+DIM mi as UInteger = CAST(UInteger, ((T0 - T0 MOD 12) / 12) MOD 300)
+DIM hi as UInteger = CAST(UInteger, ((T0 - T0 MOD 144) / 144) MOD 300)
+DIM km as UByte = CAST(UByte, (T0 MOD 12) * 5)
+DIM kh as UByte = CAST(UByte, ((T0 - T0 MOD 12) / 12) MOD 12)
 DIM oi as UInteger
 DIM om as UInteger
 DIM oh as UInteger
 DIM pm  as UByte = 0
-DIM dia as UByte = CAST(UByte, DIA0)
+DIM dia as UByte = DIA0
 DIM acc as UInteger = 0
 DIM nb  as UByte
 DIM pl  as UByte
 DIM d   as UByte
-DIM toc as UByte = 0
+DIM k   as UByte
+DIM toc as UByte = 20
 DIM rep as UByte = 0
 DIM hp  as UByte = 0
 
@@ -256,18 +232,17 @@ PLOT cx, cy : DRAW ax(2, si), ay(2, si)
 pl = PEEK(23672)
 
 DO
+  ' Espera 1 frame dormido en HALT (PAUSE); sale antes si hay
+  ' una tecla pulsada. El despertar ocurre con la INT del ULA
+  PAUSE 1
+
   ' Salir con cualquier tecla (A8-A15 a 0 = todas las semifilas)
   IF ((IN 254) BAND 31) <> 31 THEN EXIT DO
 
-  ' Sin halt ni ASM: el bucle gira libre y solo acumula cuando
-  ' FRAMES (23672) salta; si no ha saltado (d = 0) esta vuelta
-  ' no hace nada. La ULA incrementa FRAMES al comenzar el
-  ' VBLANK, así que el dibujo sigue sincronizado con el
-  ' refresco de pantalla igual que con halt
+  ' Delta de FRAMES (UByte, envuelve solo): compensa frames
+  ' perdidos si un paso dura más de un frame
   nb = PEEK(23672)
-  ' Delta modular explícito: correcto aunque el compilador
-  ' promocione la resta a 16 bits con signo
-  d = (nb - pl) BAND 255
+  d = nb - pl
   pl = nb
   acc = acc + d
 
@@ -275,36 +250,29 @@ DO
   WHILE acc >= UMBRAL
     acc = acc - UMBRAL
 
-    pasos = pasos + 1
-
     ' --- Segundero: dibujar la nueva ANTES de borrar la vieja,
     '     así nunca hay un frame con el dial sin aguja ---
     oi = si
-    si = CAST(UInteger, pasos MOD 300)
+    si = si + 1
+    IF si = 300 THEN si = 0
     PLOT cx, cy : DRAW ax(2, si), ay(2, si)
     PLOT cx, cy : DRAW ax(2, oi), ay(2, oi)
 
     ' --- Reparación de la fusión triple de las 12: el borrado
     '     del segundero acaba de apagar la línea fundida
     '     (horario+minutero); se reenciende ---
-    IF rep THEN
+    IF rep <> 0 THEN
       PLOT cx, cy : DRAW ax(0, hi), ay(0, hi)
       rep = 0
     END IF
 
-    ' --- Tic-tac: tono alterno en cada paso (BEEP de la ROM) ---
-    IF toc THEN
-      BEEP 0.008, 28
-      toc = 0
-    ELSE
-      BEEP 0.008, 40
-      toc = 1
-    END IF
-
     ' --- Minutero: cambia cada 60 pasos (12 s) ---
-    om = mi
-    mi = CAST(UInteger, (pasos / 60) MOD 300)
-    IF mi <> om THEN
+    km = km + 1
+    IF km = 60 THEN
+      km = 0
+      om = mi
+      mi = mi + 1
+      IF mi = 300 THEN mi = 0
       PLOT cx, cy : DRAW ax(1, mi), ay(1, mi)
       IF hp = 1 AND om = hi THEN
         ' El minutero se separa del horario tras la fusión de
@@ -318,29 +286,37 @@ DO
         PLOT cx, cy : DRAW ax(1, om), ay(1, om)
       END IF
 
-      ' --- Horario: cambia cada 720 pasos (144 s) ---
-      oh = hi
-      hi = CAST(UInteger, (pasos / 720) MOD 300)
-      IF hi <> oh THEN
-        IF hi = 0 THEN
+      ' --- Horario: cambia cada 12 pasos del minutero (144 s) ---
+      kh = kh + 1
+      IF kh = 12 THEN
+        kh = 0
+        oh = hi
+        hi = hi + 1
+        IF hi = 300 THEN
           ' Medianoche y mediodía: cambia pm
+          hi = 0
           pm = 1 - pm
           IF pm = 0 THEN
             ' Medianoche: avanza el día
             IF dia = DIASMES THEN dia = 1 ELSE dia = dia + 1
             drawDate(dia)
           END IF
+          ' Fusión triple en las 12 en punto (si = 0 y mi = 0
+          ' siempre en este instante): reparación y borrado parcial
+          rep = 1 : hp = 1
         END IF
         PLOT cx, cy : DRAW ax(0, hi), ay(0, hi)
         PLOT cx, cy : DRAW ax(0, oh), ay(0, oh)
-        ' Fusión triple en las 12 en punto (12:00 / 00:00):
-        ' activar la reparación (rep) y el borrado parcial (hp)
-        IF hi = 0 AND si = 0 AND mi = 0 THEN
-          rep = 1
-          hp = 1
-        END IF
       END IF
     END IF
+
+    ' --- Tic-tac: pulso de altavoz SIN DI, ancho alterno 20/45
+    '     (con el BEEP de la ROM las interrupciones quedan
+    '     desactivadas y se pueden perder frames) ---
+    OUT 254, 16
+    FOR k = 1 TO toc : NEXT k
+    OUT 254, 0
+    toc = 65 - toc
   END WHILE
 LOOP
 

@@ -108,10 +108,10 @@ SUB drawFace()
 
   ' Barra inferior: PRINT borra el fondo de sus celdas, así que
   ' va antes que cualquier dibujo de la esfera
-  PAPER 5 : INK 0
+  PAPER 1 : INK 7 : FLASH 1
   PRINT AT 21,0; "                                ";
-  PRINT AT 21,9; TITLE
-  PAPER 0 : INK 6
+  PRINT AT 21,9; FLASH 1; TITLE
+  PAPER 0 : INK 6: FLASH 0
 
   ' Textos del dial ANTES de los círculos y marcas (PRINT machaca
   ' el fondo de sus celdas; los dibujos solo añaden pixeles)

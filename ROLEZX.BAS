@@ -112,16 +112,8 @@ SUB drawFace()
   DIM s as Float
   DIM c as Float
 
-  BORDER 0 : PAPER 0 : INK 6 : BRIGHT 1 : OVER 0 : INVERSE 0 : CLS
 
-  ' Barra inferior: PRINT borra el fondo de sus celdas, asi que
-  ' va antes que cualquier dibujo de la esfera
-  PAPER 1 : INK 7 : FLASH 1
-  PRINT AT 21,0; "                                ";
-  PRINT AT 21,9; FLASH 1; TITLE
-  PAPER 0 : INK 6: FLASH 0
-
-  ' Textos del dial ANTES de los circulos y marcas (PRINT machaca
+' Textos del dial ANTES de los circulos y marcas (PRINT machaca
   ' el fondo de sus celdas; los dibujos solo anaden pixeles)
   PRINT AT 8, 8; "OYSTER PERPETUAL"
   PRINT AT 13, 12; "DATEJUST"
@@ -167,6 +159,18 @@ SUB drawFace()
 
   CIRCLE cx, cy, 3
 END SUB
+
+
+  BORDER 0 : PAPER 0 : INK 6 : BRIGHT 1 : OVER 0 : INVERSE 0 : CLS
+
+  ' Barra inferior: PRINT borra el fondo de sus celdas, asi que
+  ' va antes que cualquier dibujo de la esfera
+  PAPER 1 : INK 7 : FLASH 1
+  PRINT AT 21,0; "                                ";
+  PRINT AT 21,9; FLASH 1; TITLE
+  PAPER 0 : INK 6: FLASH 0
+
+
 
 ' ------------------------------------------------------------
 ' Tablas de agujas aplanadas: 300 pasos/vuelta por aguja.

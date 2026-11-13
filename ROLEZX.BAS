@@ -1,33 +1,74 @@
 ' ************************************************************
-'  ROLEZX v21 - Reloj analogico estilo Rolex Datejust
+'  ROLEZX v24 - Reloj analogico estilo Rolex Datejust
 '  (Boriel ZX BASIC para ZX Spectrum 48K, 50 Hz)
 ' ************************************************************
-'  CAMBIOS v21 (optimizacion de velocidad y tamano sobre v20):
+'  CAMBIOS v24 (velocidad percibida sobre v23):
 '
-'   * ESPERA DE FRAME CON HALT en linea en vez de PAUSE 1:
-'     la PAUSE de la ROM, ademas de dormirse, recorre el
-'     teclado en cada frame. HALT despierta con la misma INT
-'     del ULA y cuesta 4 T-states. La deteccion de tecla ya
-'     la hace el IN 254 de abajo, igual que antes.
-'   * TABLAS DE AGUJAS APLANADAS: ax/ay pasan de 2D (2,299)
-'     a 1D de 900 con desplazamientos fijos hora=0, minuto=300,
-'     segundo=600. Cada acceso ax(i) pasa de una multiplicacion
-'     16 bits (stride no es potencia de 2) a una suma. Ademas
-'     el wrap de 8 bits del indice que v20 corregio a base de
-'     UInteger ahora es estructuralmente imposible: los offsets
-'     son UInteger y el indice maximo es 899.
-'   * acc pasa a UByte: todo el camino caliente (delta de
-'     frames, acumulador, comparacion con UMBRAL) es
-'     aritmetica de 8 bits. Cota superior: acc < UMBRAL-1+d,
-'     y d solo puede ser grande en drawDate de medianoche
-'     (~70 frames): no hay desbordamiento posible.
-'   * bigChar: base Y precalculada fuera del bucle de filas.
-'   * Comentario corregido: la corona va a las 12 (cy+46 es
-'     por encima del centro), no a las 6.
-'   * Verificado y SIN CAMBIOS: contadores derivados de T0
-'     (si/mi/hi/km/kh son consistentes entre si) y la logica
-'     de fusion de las 12 (rep/hp), trazada paso a paso con
-'     paridad XOR: correcta en medianoche y mediodia.
+'   * LA ESFERA APARECE ANTES DE CALCULAR: el programa ya no hace
+'     primero todos los calculos y despues pinta. Ahora pinta en
+'     este orden: textos -> fondo azul (solo POKE, instantaneo) ->
+'     aros -> marcas y corona -> ROLEZX -> fecha, y al final genera
+'     la tabla de agujas y dibuja las agujas. El tiempo total es el
+'     mismo, pero se ve construirse el reloj desde el primer
+'     instante en vez de esperar con la pantalla vacia.
+'   * Para poder pintar el fondo azul al principio, PAPER 8
+'     (transparente) se activa antes de los aros y las marcas: asi
+'     PLOT/DRAW/CIRCLE no pisan el azul. Todos los DIM van juntos
+'     antes del codigo; sin cambios de logica ni de aspecto final.
+'
+'  CAMBIOS v23 (arranque, tamano y color sobre v22):
+'
+'   * ARRANQUE ~1 s MAS RAPIDO: v22 llamaba a SIN y COS 270 veces
+'     (60 en la esfera + 75 en la tabla, por 2). La ROM tarda
+'     varios ms en cada una. Ahora se calcula solo el paso
+'     angular (4 llamadas) y cada seno/coseno se obtiene girando
+'     el anterior: sen(t+d) = sen*cos(d) + cos*sen(d),
+'     cos(t+d) = cos*cos(d) - sen*sen(d). Son 4 multiplicaciones
+'     en coma flotante en vez de 2 llamadas trigonometricas. El
+'     error acumulado en 75 pasos es ~1e-8: irrelevante. Para que
+'     los valores justo en x.5 (r*sen(30 grados) = 31.5, 16.5...)
+'     redondeen siempre igual y las agujas sean simetricas, el
+'     redondeo suma 0.5001 en vez de 0.5.
+'   * TABLA FUERA DEL BINARIO: ax se declara AT 49152. Boriel
+'     guarda los DIM sin inicializar como bytes a cero dentro del
+'     binario (1125 bytes). Con AT solo se mapea la memoria, no
+'     se reserva ni se emite nada. La tabla se rellena entera al
+'     arrancar, asi que no importa lo que haya en esa zona. Si tu
+'     version de Boriel rechaza DIM ... AT para arrays, quita
+'     " AT 49152" y todo sigue funcionando (solo crece el binario).
+'   * Se quitan el marco negro de la ventana de la fecha y las
+'     franjas arcoiris de la barra: vuelven la ventana azul de v22
+'     y la barra original. Menos codigo y menos datos.
+'
+'  CAMBIOS v22 (tamano, velocidad y color sobre v21):
+'
+'   * UNA SOLA TABLA DE SENOS: ay(k) = ax(k + 75) (el coseno es
+'     el seno adelantado un cuarto de vuelta = 75 pasos). Se
+'     elimina ay (900 bytes) y ax pasa de 900 a 1125: cada aguja
+'     ocupa un bloque de 375 (300 + 75 de solape para que
+'     k + 75 nunca se salga de su bloque).
+'       hora   : ax(0..374)     minuto : ax(375..749)
+'       segundo: ax(750..1124)
+'     La generacion hace 5 escrituras por aguja en vez de 8 y ya
+'     no multiplica en 16 bits (off se acumula sumando 375).
+'   * INDICES CON SU DESPLAZAMIENTO YA INCLUIDO: mi va de 375 a
+'     674 y si de 750 a 1049, asi el bucle caliente hace ax(si)
+'     en vez de ax(600 + si) (una suma de 16 bits menos por
+'     acceso y menos bytes por cada uno).
+'   * x, y e i pasan a Byte/UByte; rr() se inicializa en la
+'     declaracion (3 asignaciones menos).
+'   * COLOR SIN CLASH: esfera con papel azul (PAPER 1) e ink
+'     amarillo (INK 6) en TODAS las celdas. Como el ink es el
+'     mismo en toda la esfera, las agujas (XOR) nunca cambian de
+'     color al cruzar de una celda a otra. El azul solo es
+'     fondo: se pinta una vez con POKE a los atributos.
+'   * PAPER 8 (transparente) tras pintar el fondo: PLOT, DRAW y
+'     CIRCLE de Boriel reescriben el atributo COMPLETO de la
+'     celda con los colores actuales; con papel transparente
+'     solo reescriben ink 6 / bright 1, que ya son los de la
+'     celda, y el azul no se pierde.
+'   * Verificado y SIN CAMBIOS: espera con HALT, acc UByte, logica
+'     de fusion de las 12 (rep/hp), contadores derivados de T0.
 ' ************************************************************
 
 #define cx      128
@@ -80,8 +121,9 @@ END SUB
 
 ' ------------------------------------------------------------
 ' Ventana de fecha a las 3 (estilo Datejust)
-' El digito se dibuja con OVER 1 (XOR): apaga los pixeles del
-' fondo amarillo sin cambiar los atributos de las celdas.
+' La ventana se rellena con pixeles de ink (amarillo) sobre el
+' papel azul de la esfera; el digito se dibuja con OVER 1 (XOR):
+' apaga esos pixeles y deja ver el azul, sin tocar atributos.
 ' Deja OVER 1 e INK 6 al salir (el bucle principal dibuja asi).
 ' ------------------------------------------------------------
 SUB drawDate(n as UByte)
@@ -111,19 +153,14 @@ SUB drawFace()
   DIM b as Float
   DIM s as Float
   DIM c as Float
+  DIM sa as Float
+  DIM ca as Float
 
-
-' Textos del dial ANTES de los circulos y marcas (PRINT machaca
-  ' el fondo de sus celdas; los dibujos solo anaden pixeles)
-  PRINT AT 8, 8; "OYSTER PERPETUAL"
-  PRINT AT 13, 12; "DATEJUST"
-
-  CIRCLE cx, cy, rOuter
-  CIRCLE cx, cy, rOuter - 5
+  ' Seno y coseno de cada marca girando el anterior (paso = 6 grados)
+  sa = SIN(PI / 30.0) : ca = COS(PI / 30.0)
+  s = 0 : c = 1
 
   FOR n = 0 TO 59
-    a = n * (PI / 30.0)
-    s = SIN(a) : c = COS(a)
     PLOT cx + 0.5 + (rOuter - 2) * s, cy + 0.5 + (rOuter - 2) * c
     DRAW 4 * s, 4 * c
 
@@ -143,6 +180,7 @@ SUB drawFace()
     END IF
     PLOT cx + 0.5 + r * s, cy + 0.5 + r * c
     DRAW (rOuter - 8 - r) * s, (rOuter - 8 - r) * c
+    a = s * ca + c * sa : c = c * ca - s * sa : s = a
   NEXT n
 
   ' Corona (logo a las 12, entre el texto y el indice de las 12)
@@ -161,65 +199,46 @@ SUB drawFace()
 END SUB
 
 
-  BORDER 0 : PAPER 0 : INK 6 : BRIGHT 1 : OVER 0 : INVERSE 0 : CLS
-
-  ' Barra inferior: PRINT borra el fondo de sus celdas, asi que
-  ' va antes que cualquier dibujo de la esfera
-  PAPER 1 : INK 7 : FLASH 1
-  PRINT AT 21,0; "                                ";
-  PRINT AT 21,9; FLASH 1; TITLE
-  PAPER 0 : INK 6: FLASH 0
-
-
-
 ' ------------------------------------------------------------
-' Tablas de agujas aplanadas: 300 pasos/vuelta por aguja.
-'   hora:    ax(0..299)     ay(0..299)
-'   minuto:  ax(300..599)   ay(300..599)
-'   segundo: ax(600..899)   ay(600..899)
-' Un solo bucle genera los 4 cuadrantes. Los offsets son
-' UInteger: el wrap de 8 bits del indice de v20 ya no puede
-' ocurrir (off + i + 225 se evalua siempre en 16 bits).
+' Tabla de senos aplanada (ay(k) = ax(k + 75)): 300 pasos por
+' vuelta, bloques de 375 (los ultimos 75 repiten los primeros).
+'   hora:    ax(0..374)
+'   minuto:  ax(375..749)
+'   segundo: ax(750..1124)
+' Por cada paso i (0..74) y aguja: x = r*sen, y = r*cos y
+'   ax(off) = x   ax(off+75) = y   ax(off+150) = -x
+'   ax(off+225) = -y   ax(off+300) = x
+' off es UInteger: off + 300 se evalua siempre en 16 bits.
 ' ------------------------------------------------------------
-DIM ax(899) as Byte
-DIM ay(899) as Byte
+DIM ax(1124) as Byte AT 49152
 
-DIM i   as UInteger
+DIM i   as UByte
 DIM h   as UByte
 DIM off as UInteger
 DIM ang as Float
 DIM sn  as Float
 DIM cs  as Float
-DIM x   as Integer
-DIM y   as Integer
-DIM rr(2) as UByte
+DIM sd  as Float
+DIM cd  as Float
+DIM x   as Byte
+DIM y   as Byte
+DIM rr(2) as UByte = {rHora, rMin, rSec}
 
-rr(0) = rHora : rr(1) = rMin : rr(2) = rSec
-
-FOR i = 0 TO 74
-  ang = i * (PI / 150.0)
-  sn = SIN(ang) : cs = COS(ang)
-  FOR h = 0 TO 2
-    off = CAST(UInteger, h) * 300
-    x = CAST(Integer, rr(h) * sn + 0.5)
-    y = CAST(Integer, rr(h) * cs + 0.5)
-    ax(off + i)       =  x  : ay(off + i)       =  y
-    ax(off + i + 75)  =  y  : ay(off + i + 75)  = -x
-    ax(off + i + 150) = -x  : ay(off + i + 150) = -y
-    ax(off + i + 225) = -y  : ay(off + i + 225) =  x
-  NEXT h
-NEXT i
+' Anchos (en celdas, a cada lado de la columna 16) de la zona azul
+' en las filas 2..18: celdas que caen enteras dentro de rOuter
+DIM aw(16) as UByte = {3, 5, 6, 7, 7, 8, 8, 8, 8, 8, 8, 8, 7, 7, 6, 4, 2}
+DIM ad  as UInteger = 22592     ' atributos de la fila 2 (22528 + 2 * 32)
 
 ' ------------------------------------------------------------
 ' Estado del reloj (todo sale de T0 en compilacion)
 '   1 paso = 0.2 s (5 pasos/s).  300 pasos = 1 vuelta (60 s)
-'   si: segundero 0..299, un paso por paso
-'   mi: minutero  0..299, un paso cada 60 pasos (km cuenta 0..59)
+'   si: segundero 750..1049, un paso por paso
+'   mi: minutero  375..674, un paso cada 60 pasos (km cuenta 0..59)
 '   hi: horario   0..299, un paso cada 12 del minutero (kh 0..11)
 '   hi envuelve cada 12 h -> cambia pm; pm vuelve a 0 -> nuevo dia
 ' ------------------------------------------------------------
-DIM si as UInteger = CAST(UInteger, (T0 MOD 60) * 5)
-DIM mi as UInteger = CAST(UInteger, ((T0 - T0 MOD 12) / 12) MOD 300)
+DIM si as UInteger = CAST(UInteger, (T0 MOD 60) * 5 + 750)
+DIM mi as UInteger = CAST(UInteger, ((T0 - T0 MOD 12) / 12) MOD 300 + 375)
 DIM hi as UInteger = CAST(UInteger, ((T0 - T0 MOD 144) / 144) MOD 300)
 DIM km as UByte = CAST(UByte, (T0 MOD 12) * 5)
 DIM kh as UByte = CAST(UByte, ((T0 - T0 MOD 12) / 12) MOD 12)
@@ -237,15 +256,72 @@ DIM toc as UByte = 20
 DIM rep as UByte = 0
 DIM hp  as UByte = 0
 
+
+  BORDER 0 : PAPER 0 : INK 6 : BRIGHT 1 : OVER 0 : INVERSE 0 : CLS
+
+  ' Barra inferior: PRINT borra el fondo de sus celdas, asi que
+  ' va antes que cualquier dibujo de la esfera
+  PAPER 1 : INK 7 : FLASH 1
+  PRINT AT 21,0; "                                ";
+  PRINT AT 21,9; FLASH 1; TITLE
+  PAPER 0 : INK 6: FLASH 0
+
+' ------------------------------------------------------------
+' ARRANQUE EN ORDEN DE "LO QUE SE VE ANTES": cada paso pinta algo
+' mientras el siguiente calcula, asi la espera no es una pantalla
+' vacia. Orden: textos -> fondo azul -> aros -> marcas -> fecha ->
+' tabla de agujas (solo hace falta para las agujas) -> agujas.
+' ------------------------------------------------------------
+
+' Textos del dial ANTES de los circulos y marcas (PRINT machaca
+' el fondo de sus celdas; los dibujos solo anaden pixeles)
+PRINT AT 8, 8; "OYSTER PERPETUAL"
+PRINT AT 13, 12; "DATEJUST"
+
+' Fondo azul de la esfera: atributo 78 = BRIGHT 1, PAPER 1, INK 6.
+' El ink es el mismo en todas las celdas (6): las agujas no cambian
+' de color al cruzar celdas, asi que no hay color clash.
+FOR h = 0 TO 16
+  FOR k = 16 - aw(h) TO 15 + aw(h)
+    POKE ad + k, 78
+  NEXT k
+  ad = ad + 32
+NEXT h
+
+' Papel transparente: PLOT/DRAW/CIRCLE ya no reescriben el fondo
+PAPER 8
+
+CIRCLE cx, cy, rOuter
+CIRCLE cx, cy, rOuter - 5
+
 drawFace()
 drawDate(dia)
+
+' Tabla de agujas (ver descripcion junto a los DIM).
+' Seno y coseno del paso (1.2 grados); cada vuelta del bucle gira (sn, cs)
+sd = SIN(PI / 150.0) : cd = COS(PI / 150.0)
+sn = 0 : cs = 1
+
+FOR i = 0 TO 74
+  off = CAST(UInteger, i)
+  FOR h = 0 TO 2
+    x = CAST(Byte, rr(h) * sn + 0.5001)
+    y = CAST(Byte, rr(h) * cs + 0.5001)
+    ax(off)       =  x : ax(off + 75)  =  y
+    ax(off + 150) = -x : ax(off + 225) = -y
+    ax(off + 300) =  x
+    off = off + 375
+  NEXT h
+  ang = sn * cd + cs * sd : cs = cs * cd - sn * sd : sn = ang
+NEXT i
+
 
 ' Agujas en modo XOR (las 3 siempre, igual que en marcha)
 OVER 1
 
-PLOT cx, cy : DRAW ax(hi), ay(hi)
-PLOT cx, cy : DRAW ax(300 + mi), ay(300 + mi)
-PLOT cx, cy : DRAW ax(600 + si), ay(600 + si)
+PLOT cx, cy : DRAW ax(hi), ax(hi + 75)
+PLOT cx, cy : DRAW ax(mi), ax(mi + 75)
+PLOT cx, cy : DRAW ax(si), ax(si + 75)
 
 pl = PEEK(23672)
 
@@ -275,15 +351,15 @@ DO
     '     asi nunca hay un frame con el dial sin aguja ---
     oi = si
     si = si + 1
-    IF si = 300 THEN si = 0
-    PLOT cx, cy : DRAW ax(600 + si), ay(600 + si)
-    PLOT cx, cy : DRAW ax(600 + oi), ay(600 + oi)
+    IF si = 1050 THEN si = 750
+    PLOT cx, cy : DRAW ax(si), ax(si + 75)
+    PLOT cx, cy : DRAW ax(oi), ax(oi + 75)
 
     ' --- Reparacion de la fusion triple de las 12: el borrado
     '     del segundero acaba de apagar la linea fundida
     '     (horario+minutero); se reenciende ---
     IF rep <> 0 THEN
-      PLOT cx, cy : DRAW ax(hi), ay(hi)
+      PLOT cx, cy : DRAW ax(hi), ax(hi + 75)
       rep = 0
     END IF
 
@@ -293,18 +369,18 @@ DO
       km = 0
       om = mi
       mi = mi + 1
-      IF mi = 300 THEN mi = 0
-      PLOT cx, cy : DRAW ax(300 + mi), ay(300 + mi)
-      IF hp = 1 AND om = hi THEN
+      IF mi = 675 THEN mi = 375
+      PLOT cx, cy : DRAW ax(mi), ax(mi + 75)
+      IF hp = 1 AND om = hi + 375 THEN
         ' El minutero se separa del horario tras la fusion de
         ' las 12: borrar SOLO su tramo exterior (r34..52).
         ' El tramo r0..33 queda encendido: es el horario.
-        ' Se empieza en ay(om)+1 para no tocar su punta
-        PLOT cx + ax(om), cy + ay(om) + 1
-        DRAW ax(300 + om) - ax(om), ay(300 + om) - ay(om) - 1
+        ' Se empieza en y(hi)+1 para no tocar su punta
+        PLOT cx + ax(hi), cy + ax(hi + 75) + 1
+        DRAW ax(om) - ax(hi), ax(om + 75) - ax(hi + 75) - 1
         hp = 0
       ELSE
-        PLOT cx, cy : DRAW ax(300 + om), ay(300 + om)
+        PLOT cx, cy : DRAW ax(om), ax(om + 75)
       END IF
 
       ' --- Horario: cambia cada 12 pasos del minutero (144 s) ---
@@ -322,12 +398,12 @@ DO
             IF dia = DIASMES THEN dia = 1 ELSE dia = dia + 1
             drawDate(dia)
           END IF
-          ' Fusion triple en las 12 en punto (si = 0 y mi = 0
+          ' Fusion triple en las 12 en punto (si = 750 y mi = 375
           ' siempre en este instante): reparacion y borrado parcial
           rep = 1 : hp = 1
         END IF
-        PLOT cx, cy : DRAW ax(hi), ay(hi)
-        PLOT cx, cy : DRAW ax(oh), ay(oh)
+        PLOT cx, cy : DRAW ax(hi), ax(hi + 75)
+        PLOT cx, cy : DRAW ax(oh), ax(oh + 75)
       END IF
     END IF
 

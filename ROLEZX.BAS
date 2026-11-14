@@ -1,74 +1,32 @@
 ' ************************************************************
-'  ROLEZX v24 - Reloj analogico estilo Rolex Datejust
+'  ROLEZX v25 - Reloj analogico estilo Rolex Datejust
 '  (Boriel ZX BASIC para ZX Spectrum 48K, 50 Hz)
 ' ************************************************************
-'  CAMBIOS v24 (velocidad percibida sobre v23):
+'  CAMBIOS v25 (tamano y arranque sobre v24):
 '
-'   * LA ESFERA APARECE ANTES DE CALCULAR: el programa ya no hace
-'     primero todos los calculos y despues pinta. Ahora pinta en
-'     este orden: textos -> fondo azul (solo POKE, instantaneo) ->
-'     aros -> marcas y corona -> ROLEZX -> fecha, y al final genera
-'     la tabla de agujas y dibuja las agujas. El tiempo total es el
-'     mismo, pero se ve construirse el reloj desde el primer
-'     instante en vez de esperar con la pantalla vacia.
-'   * Para poder pintar el fondo azul al principio, PAPER 8
-'     (transparente) se activa antes de los aros y las marcas: asi
-'     PLOT/DRAW/CIRCLE no pisan el azul. Todos los DIM van juntos
-'     antes del codigo; sin cambios de logica ni de aspecto final.
+'   * BINARIO MAS PEQUENO: se elimina por completo la libreria
+'     de PRINT (aprox. 1.6 KB, ~25% del binario). Los cinco
+'     PRINT se sustituyen por putRom (copia del caracter ROM a
+'     la celda de atributo) y POKE directo de atributos. Las
+'     cadenas van como arrays de UByte: la inicializacion de
+'     arrays ya esta incluida, asi que no se anade ninguna
+'     libreria nueva.
+'   * ARRANQUE MAS RAPIDO (velocidad percibida): bigChar y el
+'     relleno de la ventana de fecha pasan de PLOT/DRAW (una
+'     llamada ROM por pixel) a POKE directo sobre la bitmap.
+'     ROLEZX y la fecha se pintan en ~1 ms en vez de ~70 ms.
+'     Verificado por simulacion (scripts/verify_poke.py) que el
+'     resultado en pantalla es bit a bit identico al original.
+'   * SIN CAMBIOS DE LOGICA NI DE ASPECTO: esfera, tabla de
+'     senos, fusion de las 12, tic-tac, espera con HALT,
+'     deteccion de tecla y orden de pintado de v24.
 '
-'  CAMBIOS v23 (arranque, tamano y color sobre v22):
-'
-'   * ARRANQUE ~1 s MAS RAPIDO: v22 llamaba a SIN y COS 270 veces
-'     (60 en la esfera + 75 en la tabla, por 2). La ROM tarda
-'     varios ms en cada una. Ahora se calcula solo el paso
-'     angular (4 llamadas) y cada seno/coseno se obtiene girando
-'     el anterior: sen(t+d) = sen*cos(d) + cos*sen(d),
-'     cos(t+d) = cos*cos(d) - sen*sen(d). Son 4 multiplicaciones
-'     en coma flotante en vez de 2 llamadas trigonometricas. El
-'     error acumulado en 75 pasos es ~1e-8: irrelevante. Para que
-'     los valores justo en x.5 (r*sen(30 grados) = 31.5, 16.5...)
-'     redondeen siempre igual y las agujas sean simetricas, el
-'     redondeo suma 0.5001 en vez de 0.5.
-'   * TABLA FUERA DEL BINARIO: ax se declara AT 49152. Boriel
-'     guarda los DIM sin inicializar como bytes a cero dentro del
-'     binario (1125 bytes). Con AT solo se mapea la memoria, no
-'     se reserva ni se emite nada. La tabla se rellena entera al
-'     arrancar, asi que no importa lo que haya en esa zona. Si tu
-'     version de Boriel rechaza DIM ... AT para arrays, quita
-'     " AT 49152" y todo sigue funcionando (solo crece el binario).
-'   * Se quitan el marco negro de la ventana de la fecha y las
-'     franjas arcoiris de la barra: vuelven la ventana azul de v22
-'     y la barra original. Menos codigo y menos datos.
-'
-'  CAMBIOS v22 (tamano, velocidad y color sobre v21):
-'
-'   * UNA SOLA TABLA DE SENOS: ay(k) = ax(k + 75) (el coseno es
-'     el seno adelantado un cuarto de vuelta = 75 pasos). Se
-'     elimina ay (900 bytes) y ax pasa de 900 a 1125: cada aguja
-'     ocupa un bloque de 375 (300 + 75 de solape para que
-'     k + 75 nunca se salga de su bloque).
-'       hora   : ax(0..374)     minuto : ax(375..749)
-'       segundo: ax(750..1124)
-'     La generacion hace 5 escrituras por aguja en vez de 8 y ya
-'     no multiplica en 16 bits (off se acumula sumando 375).
-'   * INDICES CON SU DESPLAZAMIENTO YA INCLUIDO: mi va de 375 a
-'     674 y si de 750 a 1049, asi el bucle caliente hace ax(si)
-'     en vez de ax(600 + si) (una suma de 16 bits menos por
-'     acceso y menos bytes por cada uno).
-'   * x, y e i pasan a Byte/UByte; rr() se inicializa en la
-'     declaracion (3 asignaciones menos).
-'   * COLOR SIN CLASH: esfera con papel azul (PAPER 1) e ink
-'     amarillo (INK 6) en TODAS las celdas. Como el ink es el
-'     mismo en toda la esfera, las agujas (XOR) nunca cambian de
-'     color al cruzar de una celda a otra. El azul solo es
-'     fondo: se pinta una vez con POKE a los atributos.
-'   * PAPER 8 (transparente) tras pintar el fondo: PLOT, DRAW y
-'     CIRCLE de Boriel reescriben el atributo COMPLETO de la
-'     celda con los colores actuales; con papel transparente
-'     solo reescriben ink 6 / bright 1, que ya son los de la
-'     celda, y el azul no se pierde.
-'   * Verificado y SIN CAMBIOS: espera con HALT, acc UByte, logica
-'     de fusion de las 12 (rep/hp), contadores derivados de T0.
+'  Historia: v23 arranco ~1 s mas rapido girando el seno en vez
+'  de llamar a SIN/COS; v22 una sola tabla de senos (ax fuera
+'  del binario con AT) y color sin clash (PAPER 1 + INK 6 en
+'  toda la esfera, agujas en XOR). v24 reordeno el pintado para
+'  que el reloj se construya desde el primer instante. v25
+'  mantiene todo eso y ademas recorta tamano y arranque.
 ' ************************************************************
 
 #define cx      128
@@ -85,60 +43,107 @@
 ' 50 Hz -> 1 frame = 20 ms. Paso del segundero = 10 frames = 0.2 s
 #define UMBRAL  10
 
-#define TITLE   "ROLEZX by Guti"
+#define TITLE_LEN 14       ' "ROLEZX by Guti"
 
 ' ------------------------------------------------------------
-' Caracter ROM escalado 2x (16x16 px) sin tocar atributos
+' Direccion del byte de bitmap que contiene el pixel (x, y),
+' y en coords hardware (0 = arriba). Usada por bigChar y
+' drawDate para escribir pixeles sin pasar por PLOT.
 ' ------------------------------------------------------------
-SUB bigChar(x as UByte, yt as UByte, ch as UByte)
+FUNCTION scrAddr(y as UByte, x as UByte) as UInteger
+  RETURN 16384 + (CAST(UInteger, y >> 6) << 11) + (CAST(UInteger, y BAND 7) << 8) + (CAST(UInteger, (y >> 3) BAND 7) << 5) + CAST(UInteger, x >> 3)
+END FUNCTION
+
+' Duplica cada bit de un nibble: exn(n) -> 8 bits con cada bit
+' repetido dos veces. Permite escalar un byte de caracter a 2x
+' con dos lecturas a la tabla en vez de 4 PLOT por pixel.
+DIM exn(15) as UByte = {0x00, 0x03, 0x0C, 0x0F, 0x30, 0x33, 0x3C, 0x3F, 0xC0, 0xC3, 0xCC, 0xCF, 0xF0, 0xF3, 0xFC, 0xFF}
+
+' ------------------------------------------------------------
+' putRom: copia un caracter ROM (1x) a la celda de atributo
+' (fila r, columna c). Solo toca la bitmap, no los atributos:
+' los atributos de cada celda ya los pone CLS, el POKE del fondo
+' azul o el POKE de la barra. Sustituye a PRINT AT r,c;CHR$ ch
+' para no arrastrar la libreria de PRINT (~1.6 KB).
+' ------------------------------------------------------------
+SUB putRom(r as UByte, c as UByte, ch as UByte)
+  DIM k as UByte
+  DIM kk as UInteger
+  DIM src as UInteger
+  DIM base as UInteger
+  src = 15360 + CAST(UInteger, ch) * 8
+  base = 16384 + (CAST(UInteger, r >> 3) << 11) + (CAST(UInteger, r BAND 7) << 5) + c
+  FOR k = 0 TO 7
+    kk = CAST(UInteger, k) << 8
+    POKE base + kk, PEEK(src + k)
+  NEXT k
+END SUB
+
+' ------------------------------------------------------------
+' bigChar: caracter ROM escalado 2x (16x16 px) por POKE directo
+' a la bitmap. opv = 0 anyade pixeles (OR, esfera/ROLEZX);
+' opv = 1 los invierte (XOR, recorta el digito de la fecha).
+' x debe ser multiplo de 8 (todas las llamadas lo cumplen).
+' ------------------------------------------------------------
+SUB bigChar(x as UByte, yt as UByte, ch as UByte, opv as UByte)
   DIM r as UByte
-  DIM c as UByte
   DIM b as UByte
-  DIM m as UByte
-  DIM px as UByte
-  DIM py as UByte
-  DIM y0 as UByte
-  DIM adr as UInteger
-  adr = 15360 + CAST(UInteger, ch) * 8
-  y0 = 191 - yt
+  DIM yh as UByte
+  DIM src as UInteger
+  DIM a0 as UInteger
+  DIM a1 as UInteger
+  DIM lo as UByte
+  DIM ro as UByte
+  src = 15360 + CAST(UInteger, ch) * 8
   FOR r = 0 TO 7
-    b = PEEK(adr + r)
+    b = PEEK(src + r)
     IF b <> 0 THEN
-      m = 128
-      px = x
-      py = y0 - r - r
-      FOR c = 0 TO 7
-        IF (b BAND m) <> 0 THEN
-          PLOT px, py : PLOT px + 1, py
-          PLOT px, py - 1 : PLOT px + 1, py - 1
-        END IF
-        m = m >> 1
-        px = px + 2
-      NEXT c
+      yh = yt + r + r
+      a0 = scrAddr(yh, x)         ' fila superior del bloque 2x2
+      a1 = scrAddr(yh + 1, x)     ' fila inferior (scrAddr ya da el salto de celda)
+      lo = exn(b >> 4)
+      ro = exn(b BAND 0x0F)
+      IF opv = 0 THEN
+        POKE a0,     PEEK(a0)     BOR lo
+        POKE a0 + 1, PEEK(a0 + 1) BOR ro
+        POKE a1,     PEEK(a1)     BOR lo
+        POKE a1 + 1, PEEK(a1 + 1) BOR ro
+      ELSE
+        POKE a0,     PEEK(a0)     BXOR lo
+        POKE a0 + 1, PEEK(a0 + 1) BXOR ro
+        POKE a1,     PEEK(a1)     BXOR lo
+        POKE a1 + 1, PEEK(a1 + 1) BXOR ro
+      END IF
     END IF
   NEXT r
 END SUB
 
 ' ------------------------------------------------------------
-' Ventana de fecha a las 3 (estilo Datejust)
-' La ventana se rellena con pixeles de ink (amarillo) sobre el
-' papel azul de la esfera; el digito se dibuja con OVER 1 (XOR):
-' apaga esos pixeles y deja ver el azul, sin tocar atributos.
-' Deja OVER 1 e INK 6 al salir (el bucle principal dibuja asi).
+' Ventana de fecha a las 3 (estilo Datejust). Se rellena con
+' pixeles amarillos (POKE OR sobre la bitmap; la ventana ya es
+' azul por el POKE del fondo) y el digito se recorta con XOR:
+' apaga esos pixeles y deja ver el azul. No toca atributos.
 ' ------------------------------------------------------------
 SUB drawDate(n as UByte)
-  DIM yy as UByte
-  OVER 0
-  INK 6
-  FOR yy = 99 TO 116
-    PLOT 150, yy : DRAW 35, 0
-  NEXT yy
-  OVER 1
+  DIM yr as UByte
+  DIM ab as UInteger
+  ' Relleno: x 150..185 (36 px), y 99..116 -> hardware 75..92.
+  ' Byte 18 (cols 150-151) mascara 0x03; bytes 19..22 todo 0xFF;
+  ' byte 23 (cols 184-185) mascara 0xC0.
+  FOR yr = 75 TO 92
+    ab = scrAddr(yr, 150)
+    POKE ab,     PEEK(ab)     BOR 0x03
+    POKE ab + 1, 0xFF
+    POKE ab + 2, 0xFF
+    POKE ab + 3, 0xFF
+    POKE ab + 4, 0xFF
+    POKE ab + 5, PEEK(ab + 5) BOR 0xC0
+  NEXT yr
   IF n < 10 THEN
-    bigChar(160, 76, 48 + n)
+    bigChar(160, 76, 48 + n, 1)
   ELSE
-    bigChar(152, 76, 48 + n / 10)
-    bigChar(168, 76, 48 + n MOD 10)
+    bigChar(152, 76, 48 + n / 10, 1)
+    bigChar(168, 76, 48 + n MOD 10, 1)
   END IF
 END SUB
 
@@ -191,9 +196,9 @@ SUB drawFace()
   PLOT cx + 6, cy + 46 : DRAW 0, 4
   PLOT cx - 6, cy + 46 : DRAW 12, 0
 
-  ' ROLEZX centrado en el eje del reloj
-  bigChar(80, 44, 82) : bigChar(96, 44, 79) : bigChar(112, 44, 76)
-  bigChar(128, 44, 69) : bigChar(144, 44, 90) : bigChar(160, 44, 88)
+  ' ROLEZX centrado en el eje del reloj (OR: anyade pixeles amarillos)
+  bigChar(80, 44, 82, 0)  : bigChar(96, 44, 79, 0)  : bigChar(112, 44, 76, 0)
+  bigChar(128, 44, 69, 0) : bigChar(144, 44, 90, 0) : bigChar(160, 44, 88, 0)
 
   CIRCLE cx, cy, 3
 END SUB
@@ -209,6 +214,9 @@ END SUB
 '   ax(off) = x   ax(off+75) = y   ax(off+150) = -x
 '   ax(off+225) = -y   ax(off+300) = x
 ' off es UInteger: off + 300 se evalua siempre en 16 bits.
+' AT 49152 mapea la tabla fuera del binario (se rellena al
+' arrancar); si tu Boriel rechaza DIM ... AT para arrays,
+' quita " AT 49152" y todo sigue funcionando (solo crece).
 ' ------------------------------------------------------------
 DIM ax(1124) as Byte AT 49152
 
@@ -228,6 +236,12 @@ DIM rr(2) as UByte = {rHora, rMin, rSec}
 ' en las filas 2..18: celdas que caen enteras dentro de rOuter
 DIM aw(16) as UByte = {3, 5, 6, 7, 7, 8, 8, 8, 8, 8, 8, 8, 7, 7, 6, 4, 2}
 DIM ad  as UInteger = 22592     ' atributos de la fila 2 (22528 + 2 * 32)
+
+' Textos como arrays de UByte (evita la libreria de strings y la
+' de PRINT). Codigos ASCII de cada caracter.
+DIM tTitle(13) as UByte = {82, 79, 76, 69, 90, 88, 32, 98, 121, 32, 71, 117, 116, 105}  ' "ROLEZX by Guti"
+DIM tOyster(15) as UByte = {79, 89, 83, 84, 69, 82, 32, 80, 69, 82, 80, 69, 84, 85, 65, 76}  ' "OYSTER PERPETUAL"
+DIM tDate(7)   as UByte = {68, 65, 84, 69, 74, 85, 83, 84}  ' "DATEJUST"
 
 ' ------------------------------------------------------------
 ' Estado del reloj (todo sale de T0 en compilacion)
@@ -259,24 +273,24 @@ DIM hp  as UByte = 0
 
   BORDER 0 : PAPER 0 : INK 6 : BRIGHT 1 : OVER 0 : INVERSE 0 : CLS
 
-  ' Barra inferior: PRINT borra el fondo de sus celdas, asi que
-  ' va antes que cualquier dibujo de la esfera
-  PAPER 1 : INK 7 : FLASH 1
-  PRINT AT 21,0; "                                ";
-  PRINT AT 21,9; FLASH 1; TITLE
-  PAPER 0 : INK 6: FLASH 0
+  ' ------------------------------------------------------------
+  ' ARRANQUE EN ORDEN DE "LO QUE SE VE ANTES" (v24): cada paso
+  ' pinta algo mientras el siguiente calcula. Orden: barra ->
+  ' textos del dial -> fondo azul -> aros -> marcas -> fecha ->
+  ' tabla de agujas -> agujas.
+  ' ------------------------------------------------------------
 
-' ------------------------------------------------------------
-' ARRANQUE EN ORDEN DE "LO QUE SE VE ANTES": cada paso pinta algo
-' mientras el siguiente calcula, asi la espera no es una pantalla
-' vacia. Orden: textos -> fondo azul -> aros -> marcas -> fecha ->
-' tabla de agujas (solo hace falta para las agujas) -> agujas.
-' ------------------------------------------------------------
+  ' Barra inferior azul con titulo centrado (FLASH). Atributo
+  ' 0xCF = BRIGHT 1, FLASH 1, PAPER 1, INK 7. POKE directo (sin
+  ' PRINT): la bitmap de la fila ya esta a 0 tras CLS.
+  FOR k = 0 TO 31 : POKE 23200 + k, 207 : NEXT k    ' 22528 + 21*32
+  FOR k = 0 TO TITLE_LEN - 1 : putRom(21, 9 + k, tTitle(k)) : NEXT k
 
-' Textos del dial ANTES de los circulos y marcas (PRINT machaca
-' el fondo de sus celdas; los dibujos solo anaden pixeles)
-PRINT AT 8, 8; "OYSTER PERPETUAL"
-PRINT AT 13, 12; "DATEJUST"
+  ' Textos del dial ANTES de los circulos y el fondo azul: sus
+  ' celdas quedan dentro de la zona azul y el POKE del fondo les
+  ' pondra el atributo 0x4E (azul + amarillo) despues.
+  FOR k = 0 TO 15 : putRom(8, 8 + k, tOyster(k)) : NEXT k
+  FOR k = 0 TO 7  : putRom(13, 12 + k, tDate(k)) : NEXT k
 
 ' Fondo azul de la esfera: atributo 78 = BRIGHT 1, PAPER 1, INK 6.
 ' El ink es el mismo en todas las celdas (6): las agujas no cambian
@@ -422,4 +436,4 @@ LOOP
 ' ------------------------------------------------------------
 BORDER 7 : PAPER 7 : INK 0 : BRIGHT 0 : OVER 0 : INVERSE 0
 CLS
-PRINT AT 0, 8; TITLE
+FOR k = 0 TO TITLE_LEN - 1 : putRom(0, 8 + k, tTitle(k)) : NEXT k

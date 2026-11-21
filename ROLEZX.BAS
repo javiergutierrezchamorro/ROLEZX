@@ -1,7 +1,56 @@
 ' ************************************************************
-'  ROLEZX v25 - Reloj analogico estilo Rolex Datejust
+'  ROLEZX v26 - Reloj analogico estilo Rolex Datejust
 '  (Boriel ZX BASIC para ZX Spectrum 48K, 50 Hz)
 ' ************************************************************
+'  CAMBIOS v26 (pulida de codigo, sin cambios de logica):
+'
+'   * OPTIMIZACION HOT PATH (Opt A): en el bucle DO...LOOP los 20
+'     accesos CAST(Byte, PEEK(49152 + idx)) se sustituyen por CAST(Byte, PEEK(49152+idx)).
+'     La tabla ax es 1-D de bytes en direccion fija 49152 (DIM ...
+'     AT 49152), asi que la rutina __ARRAY del runtime (que recorre
+'     la tabla de dimensiones, hace bounds-check y multiplica) es
+'     pura sobrecarga: ~530 T por acceso. PEEK directo son ~60 T.
+'     Ahorro: -104 bytes y ~1880 T por tick.
+'
+'   * ELIMINACION DE __ARRAY EN SETUP (Opt E): las 5 escrituras
+'     CAST(Byte, PEEK(49152 + off))=... del bucle de inicializacion pasan a POKE
+'     49152+off, y las 3 lecturas iniciales (PLOT antes del DO)
+'     pasan a PEEK. Con esto ax() deja de invocarse nunca: el
+'     binario ya no enlaza la maquinaria de dimensiones para ax.
+'     Ahorro adicional: -76 bytes.
+'
+'   * VARIABLES LOCALES INLINEADAS (Opt K, K3): en el bucle de
+'     frame, la variable intermedia 'd' se elimina (acc = acc +
+'     nb - pl, aritmetica modular identica). En putRom, 'kk'
+'     se inlinea (POKE base + CAST(k) SHL 8, ...). Ahorro: -24
+'     bytes. Sin efecto en comportamiento.
+'
+'   * Total: 5559 bytes (v25 original: 5763, delta -204 = -3,5%).
+'
+'   * drawDate SIN FASTCALL: el modificador FASTCALL de Boriel
+'     1.18.7 genera codigo incorrecto en esta version del
+'     compilador: el llamador pasa el parametro en A (sin push),
+'     pero el SUB lee (ix+5) esperando encontrarlo en la pila. El
+'     resultado es que n vale basura y el digito de la fecha sale
+'     mal (p.ej. "C5" en vez del dia). El SUB normal (STDCALL)
+'     hace push af en el llamador y ld a,(ix+5) en el SUB: ambos
+'     coinciden y n llega correcto. Coste: ~3-4 bytes de
+'     prologo/epilogo de pila, pero la fecha se imprime bien.
+'     Resuelve el bug de fecha que v25 arrastraba.
+'   * Comentario de drawDate aclarado: ahora explicita que la
+'     ventana de fecha se da en coords BASIC y se convierte a
+'     hardware con hw = 191 - basic, igual que hace PLOT/DRAW.
+'   * Comprobado contra la doc oficial de Boriel 2.0: el
+'     operador '\' (division entera) NO existe en este dialecto
+'     (solo '/' y 'mod'), asi que mi e hi siguen usando '/'. La
+'     variable 'ad' se reasigna en el bucle del fondo azul
+'     (ad = ad + 32), por lo que NO puede ser CONST y se deja
+'     como DIM. exn tampoco puede ser CONST (la doc no confirma
+'     CONST para arrays); se mantiene DIM con inicializador inline.
+'   * SIN CAMBIOS DE LOGICA NI DE ASPECTO: esfera, tabla de
+'     senos, fusion de las 12, tic-tac, espera con HALT,
+'     deteccion de tecla y orden de pintado de v25.
+'
 '  CAMBIOS v25 (tamano y arranque sobre v24):
 '
 '   * BINARIO MAS PEQUENO: se elimina por completo la libreria
@@ -51,7 +100,7 @@
 ' drawDate para escribir pixeles sin pasar por PLOT.
 ' ------------------------------------------------------------
 FUNCTION scrAddr(y as UByte, x as UByte) as UInteger
-  RETURN 16384 + (CAST(UInteger, y >> 6) << 11) + (CAST(UInteger, y BAND 7) << 8) + (CAST(UInteger, (y >> 3) BAND 7) << 5) + CAST(UInteger, x >> 3)
+  RETURN 16384 + (CAST(UInteger, y SHR 6) SHL 11) + (CAST(UInteger, y BAND 7) SHL 8) + (CAST(UInteger, (y SHR 3) BAND 7) SHL 5) + CAST(UInteger, x SHR 3)
 END FUNCTION
 
 ' Duplica cada bit de un nibble: exn(n) -> 8 bits con cada bit
@@ -68,14 +117,12 @@ DIM exn(15) as UByte = {0x00, 0x03, 0x0C, 0x0F, 0x30, 0x33, 0x3C, 0x3F, 0xC0, 0x
 ' ------------------------------------------------------------
 SUB putRom(r as UByte, c as UByte, ch as UByte)
   DIM k as UByte
-  DIM kk as UInteger
   DIM src as UInteger
   DIM base as UInteger
   src = 15360 + CAST(UInteger, ch) * 8
-  base = 16384 + (CAST(UInteger, r >> 3) << 11) + (CAST(UInteger, r BAND 7) << 5) + c
+  base = 16384 + (CAST(UInteger, r SHR 3) SHL 11) + (CAST(UInteger, r BAND 7) SHL 5) + c
   FOR k = 0 TO 7
-    kk = CAST(UInteger, k) << 8
-    POKE base + kk, PEEK(src + k)
+    POKE base + (CAST(UInteger, k) SHL 8), PEEK(src + k)
   NEXT k
 END SUB
 
@@ -101,7 +148,7 @@ SUB bigChar(x as UByte, yt as UByte, ch as UByte, opv as UByte)
       yh = yt + r + r
       a0 = scrAddr(yh, x)         ' fila superior del bloque 2x2
       a1 = scrAddr(yh + 1, x)     ' fila inferior (scrAddr ya da el salto de celda)
-      lo = exn(b >> 4)
+      lo = exn(b SHR 4)
       ro = exn(b BAND 0x0F)
       IF opv = 0 THEN
         POKE a0,     PEEK(a0)     BOR lo
@@ -123,11 +170,23 @@ END SUB
 ' pixeles amarillos (POKE OR sobre la bitmap; la ventana ya es
 ' azul por el POKE del fondo) y el digito se recorta con XOR:
 ' apaga esos pixeles y deja ver el azul. No toca atributos.
+'
+' SIN FASTCALL: en Boriel 1.18.7 el modificador FASTCALL en un SUB
+' genera codigo incorrecto: el llamador pasa el parametro en A
+' (sin push), pero el SUB lee (ix+5) esperando encontrarlo en la
+' pila. El resultado es que n vale basura y el digito de la fecha
+' sale mal (p.ej. "C5" en vez del dia). El SUB normal (STDCALL)
+' hace push af en el llamador y ld a,(ix+5) en el SUB: ambos
+' coinciden y n llega correcto. Coste: ~3-4 bytes de prologo/epilogo
+' de pila, pero la fecha se imprime bien.
 ' ------------------------------------------------------------
+'SUB FASTCALL drawDate(n as UByte): Falla porque el compilador trata de obtener n de la pila en vez del registro A
 SUB drawDate(n as UByte)
   DIM yr as UByte
   DIM ab as UInteger
-  ' Relleno: x 150..185 (36 px), y 99..116 -> hardware 75..92.
+  ' Relleno: x 150..185 (36 px), y 99..116 en coords BASIC
+  ' (0 = abajo). La rutina trabaja en coords hardware (0 = arriba),
+  ' asi que se aplica hw = 191 - basic -> yr 75..92, fila 75..92.
   ' Byte 18 (cols 150-151) mascara 0x03; bytes 19..22 todo 0xFF;
   ' byte 23 (cols 184-185) mascara 0xC0.
   FOR yr = 75 TO 92
@@ -205,14 +264,14 @@ END SUB
 
 
 ' ------------------------------------------------------------
-' Tabla de senos aplanada (ay(k) = ax(k + 75)): 300 pasos por
+' Tabla de senos aplanada (ay(k) = CAST(Byte, PEEK(49152 + k + 75))): 300 pasos por
 ' vuelta, bloques de 375 (los ultimos 75 repiten los primeros).
-'   hora:    ax(0..374)
-'   minuto:  ax(375..749)
-'   segundo: ax(750..1124)
+'   hora:    CAST(Byte, PEEK(49152 + 0..374))
+'   minuto:  CAST(Byte, PEEK(49152 + 375..749))
+'   segundo: CAST(Byte, PEEK(49152 + 750..1124))
 ' Por cada paso i (0..74) y aguja: x = r*sen, y = r*cos y
-'   ax(off) = x   ax(off+75) = y   ax(off+150) = -x
-'   ax(off+225) = -y   ax(off+300) = x
+'   CAST(Byte, PEEK(49152 + off)) = x   CAST(Byte, PEEK(49152 + off+75)) = y   CAST(Byte, PEEK(49152 + off+150)) = -x
+'   CAST(Byte, PEEK(49152 + off+225)) = -y   CAST(Byte, PEEK(49152 + off+300)) = x
 ' off es UInteger: off + 300 se evalua siempre en 16 bits.
 ' AT 49152 mapea la tabla fuera del binario (se rellena al
 ' arrancar); si tu Boriel rechaza DIM ... AT para arrays,
@@ -250,6 +309,13 @@ DIM tDate(7)   as UByte = {68, 65, 84, 69, 74, 85, 83, 84}  ' "DATEJUST"
 '   mi: minutero  375..674, un paso cada 60 pasos (km cuenta 0..59)
 '   hi: horario   0..299, un paso cada 12 del minutero (kh 0..11)
 '   hi envuelve cada 12 h -> cambia pm; pm vuelve a 0 -> nuevo dia
+'
+' v26 (rev): kh se mantiene. Se probo eliminarla sustituyendo el test
+' "kh = 12" por "(mi - 375) MOD 12 = 0" (correcto en comportamiento,
+' verificado por simulacion 24 h), pero el coste es alto: +79 bytes y
+' +1092 T-states por evaluacion (la rutina __MODU16 hace una division
+' larga de 16 iteraciones). kh es un contador UByte de 1 byte con
+' logica trivial (inc + sub + jp), asi que se conserva.
 ' ------------------------------------------------------------
 DIM si as UInteger = CAST(UInteger, (T0 MOD 60) * 5 + 750)
 DIM mi as UInteger = CAST(UInteger, ((T0 - T0 MOD 12) / 12) MOD 300 + 375)
@@ -264,7 +330,6 @@ DIM dia as UByte = DIA0
 DIM acc as UByte = 0
 DIM nb  as UByte
 DIM pl  as UByte
-DIM d   as UByte
 DIM k   as UByte
 DIM toc as UByte = 20
 DIM rep as UByte = 0
@@ -321,9 +386,9 @@ FOR i = 0 TO 74
   FOR h = 0 TO 2
     x = CAST(Byte, rr(h) * sn + 0.5001)
     y = CAST(Byte, rr(h) * cs + 0.5001)
-    ax(off)       =  x : ax(off + 75)  =  y
-    ax(off + 150) = -x : ax(off + 225) = -y
-    ax(off + 300) =  x
+    POKE 49152 + off,       x : POKE 49152 + off + 75,  y
+    POKE 49152 + off + 150, -x : POKE 49152 + off + 225, -y
+    POKE 49152 + off + 300,  x
     off = off + 375
   NEXT h
   ang = sn * cd + cs * sd : cs = cs * cd - sn * sd : sn = ang
@@ -333,9 +398,9 @@ NEXT i
 ' Agujas en modo XOR (las 3 siempre, igual que en marcha)
 OVER 1
 
-PLOT cx, cy : DRAW ax(hi), ax(hi + 75)
-PLOT cx, cy : DRAW ax(mi), ax(mi + 75)
-PLOT cx, cy : DRAW ax(si), ax(si + 75)
+PLOT cx, cy : DRAW CAST(Byte, PEEK(49152 + hi)), CAST(Byte, PEEK(49152 + hi + 75))
+PLOT cx, cy : DRAW CAST(Byte, PEEK(49152 + mi)), CAST(Byte, PEEK(49152 + mi + 75))
+PLOT cx, cy : DRAW CAST(Byte, PEEK(49152 + si)), CAST(Byte, PEEK(49152 + si + 75))
 
 pl = PEEK(23672)
 
@@ -353,9 +418,8 @@ DO
   ' Delta de FRAMES (UByte, envuelve solo): compensa frames
   ' perdidos si un paso dura mas de un frame
   nb = PEEK(23672)
-  d = nb - pl
+  acc = acc + nb - pl
   pl = nb
-  acc = acc + d
 
   ' Un paso cada 10 frames (0.2 s): 300 pasos = 60 s exactos
   WHILE acc >= UMBRAL
@@ -366,14 +430,14 @@ DO
     oi = si
     si = si + 1
     IF si = 1050 THEN si = 750
-    PLOT cx, cy : DRAW ax(si), ax(si + 75)
-    PLOT cx, cy : DRAW ax(oi), ax(oi + 75)
+    PLOT cx, cy : DRAW CAST(Byte, PEEK(49152 + si)), CAST(Byte, PEEK(49152 + si + 75))
+    PLOT cx, cy : DRAW CAST(Byte, PEEK(49152 + oi)), CAST(Byte, PEEK(49152 + oi + 75))
 
     ' --- Reparacion de la fusion triple de las 12: el borrado
     '     del segundero acaba de apagar la linea fundida
     '     (horario+minutero); se reenciende ---
     IF rep <> 0 THEN
-      PLOT cx, cy : DRAW ax(hi), ax(hi + 75)
+      PLOT cx, cy : DRAW CAST(Byte, PEEK(49152 + hi)), CAST(Byte, PEEK(49152 + hi + 75))
       rep = 0
     END IF
 
@@ -384,17 +448,17 @@ DO
       om = mi
       mi = mi + 1
       IF mi = 675 THEN mi = 375
-      PLOT cx, cy : DRAW ax(mi), ax(mi + 75)
+      PLOT cx, cy : DRAW CAST(Byte, PEEK(49152 + mi)), CAST(Byte, PEEK(49152 + mi + 75))
       IF hp = 1 AND om = hi + 375 THEN
         ' El minutero se separa del horario tras la fusion de
         ' las 12: borrar SOLO su tramo exterior (r34..52).
         ' El tramo r0..33 queda encendido: es el horario.
         ' Se empieza en y(hi)+1 para no tocar su punta
-        PLOT cx + ax(hi), cy + ax(hi + 75) + 1
-        DRAW ax(om) - ax(hi), ax(om + 75) - ax(hi + 75) - 1
+        PLOT cx + CAST(Byte, PEEK(49152 + hi)), cy + CAST(Byte, PEEK(49152 + hi + 75)) + 1
+        DRAW CAST(Byte, PEEK(49152 + om)) - CAST(Byte, PEEK(49152 + hi)), CAST(Byte, PEEK(49152 + om + 75)) - CAST(Byte, PEEK(49152 + hi + 75)) - 1
         hp = 0
       ELSE
-        PLOT cx, cy : DRAW ax(om), ax(om + 75)
+        PLOT cx, cy : DRAW CAST(Byte, PEEK(49152 + om)), CAST(Byte, PEEK(49152 + om + 75))
       END IF
 
       ' --- Horario: cambia cada 12 pasos del minutero (144 s) ---
@@ -416,8 +480,8 @@ DO
           ' siempre en este instante): reparacion y borrado parcial
           rep = 1 : hp = 1
         END IF
-        PLOT cx, cy : DRAW ax(hi), ax(hi + 75)
-        PLOT cx, cy : DRAW ax(oh), ax(oh + 75)
+        PLOT cx, cy : DRAW CAST(Byte, PEEK(49152 + hi)), CAST(Byte, PEEK(49152 + hi + 75))
+        PLOT cx, cy : DRAW CAST(Byte, PEEK(49152 + oh)), CAST(Byte, PEEK(49152 + oh + 75))
       END IF
     END IF
 

@@ -1,23 +1,19 @@
 ' ************************************************************
-'  ROLEZX v28 - Reloj analogico estilo Rolex Datejust
+'  ROLEZX v30 - Reloj analogico estilo Rolex Datejust
 '  (Boriel ZX BASIC para ZX Spectrum 48K, 50 Hz)
 ' ************************************************************
-'  CAMBIOS v28 (sobre v27):
+'  CAMBIOS v30 (sobre v29):
 '
-'   * TODOS los Float de calculo geometrico pasan a Fixed
-'     (tabla de agujas + drawFace). Fixed 16.16 es mas que
-'     suficiente para radios <= 72 y 75/60 pasos de rotacion.
-'     El arranque se acelera de forma notable (operaciones
-'     aritmeticas mucho mas baratas que la FP de la ROM).
+'   * Tabla de agujas REDUCIDA de 1125 → 450 bytes.
+'     Solo se guardan x e y positivos (75 posiciones × 3 manecillas).
+'     Acceso directo ax(i), ax(i+75), etc.
 '
-'   * Se mantienen SIN/COS de la ROM solo para obtener el
-'     paso angular inicial (se convierten inmediatamente a
-'     Fixed). El resto de la rotacion iterativa es Fixed puro.
-'
-'   * Redondeo simplificado a + 0.5 (con Fixed es preciso).
-'
-'   * Resto de optimizaciones de v26/v27 intactas (MemSet,
-'     POKE long, POKE uinteger, putRom desenrollado, etc.).
+'   * Indices unificados a 0..74.
+'   * Eliminada la variable pm.
+'   * Variables temporales unificadas (old).
+'   * bigChar simplificado (sin IF b <> 0).
+'   * Tic-tac por contador de frames calibrado (1/2 frames)
+'     para sonar muy parecido al FOR original.
 '
 '  Compilar con:  zxbc -O3 -W 150 -W 160 -W 170 -W 190 -f tap -o rolezx.tap rolezx.bas
 ' ************************************************************
@@ -31,11 +27,9 @@
 #define rMin    52
 #define rSec    63
 
-#define T0      36540      ' s desde medianoche -> arranque 10:09:00
+#define T0      36540
 #define DIA0    7
 #define DIASMES 30
-
-#define UMBRAL  10
 #define TITLE_LEN 14
 
 FUNCTION scrAddr(y as UByte, x as UByte) as UInteger
@@ -72,20 +66,18 @@ SUB bigChar(x as UByte, yt as UByte, ch as UByte, opv as UByte)
   src = 15360 + CAST(UInteger, ch) * 8
   FOR r = 0 TO 7
     b = PEEK(src + r)
-    IF b <> 0 THEN
-      yh = yt + r + r
-      a0 = scrAddr(yh, x)
-      a1 = scrAddr(yh + 1, x)
-      lo = exn(b SHR 4)
-      ro = exn(b BAND 0x0F)
-      m = CAST(UInteger, lo) + (CAST(UInteger, ro) SHL 8)
-      IF opv = 0 THEN
-        POKE uinteger a0, PEEK(uinteger, a0) BOR m
-        POKE uinteger a1, PEEK(uinteger, a1) BOR m
-      ELSE
-        POKE uinteger a0, PEEK(uinteger, a0) BXOR m
-        POKE uinteger a1, PEEK(uinteger, a1) BXOR m
-      END IF
+    yh = yt + r + r
+    a0 = scrAddr(yh, x)
+    a1 = scrAddr(yh + 1, x)
+    lo = exn(b SHR 4)
+    ro = exn(b BAND 0x0F)
+    m = CAST(UInteger, lo) + (CAST(UInteger, ro) SHL 8)
+    IF opv = 0 THEN
+      POKE uinteger a0, PEEK(uinteger, a0) BOR m
+      POKE uinteger a1, PEEK(uinteger, a1) BOR m
+    ELSE
+      POKE uinteger a0, PEEK(uinteger, a0) BXOR m
+      POKE uinteger a1, PEEK(uinteger, a1) BXOR m
     END IF
   NEXT r
 END SUB
@@ -118,7 +110,6 @@ SUB drawFace()
   DIM sa as Fixed
   DIM ca as Fixed
 
-  ' Paso de 6 grados (PI/30) → Fixed
   sa = SIN(PI / 30.0)
   ca = COS(PI / 30.0)
   s = 0
@@ -163,19 +154,16 @@ SUB drawFace()
   CIRCLE cx, cy, 3
 END SUB
 
-DIM ax(1124) as Byte AT 49152
+' Tabla de agujas REDUCIDA (450 bytes)
+DIM ax(449) as Byte AT 49152
 
 DIM i   as UByte
 DIM h   as UByte
-DIM off as UInteger
-DIM ang as Fixed
 DIM sn  as Fixed
 DIM cs  as Fixed
 DIM sd  as Fixed
 DIM cd  as Fixed
-DIM x   as Byte
-DIM y   as Byte
-DIM rr(2) as UByte = {rHora, rMin, rSec}
+DIM ang as Fixed
 
 DIM aw(16) as UByte = {3, 5, 6, 7, 7, 8, 8, 8, 8, 8, 8, 8, 7, 7, 6, 4, 2}
 DIM ad  as UInteger = 22592
@@ -184,75 +172,71 @@ DIM tTitle(13) as UByte = {82, 79, 76, 69, 90, 88, 32, 98, 121, 32, 71, 117, 116
 DIM tOyster(15) as UByte = {79, 89, 83, 84, 69, 82, 32, 80, 69, 82, 80, 69, 84, 85, 65, 76}
 DIM tDate(7)   as UByte = {68, 65, 84, 69, 74, 85, 83, 84}
 
-DIM si as UInteger = CAST(UInteger, (T0 MOD 60) * 5 + 750)
-DIM mi as UInteger = CAST(UInteger, ((T0 - T0 MOD 12) / 12) MOD 300 + 375)
-DIM hi as UInteger = CAST(UInteger, ((T0 - T0 MOD 144) / 144) MOD 300)
-DIM km as UByte = CAST(UByte, (T0 MOD 12) * 5)
-DIM kh as UByte = CAST(UByte, ((T0 - T0 MOD 12) / 12) MOD 12)
-DIM oi as UInteger
-DIM om as UInteger
-DIM oh as UInteger
-DIM pm  as UByte = 0
-DIM dia as UByte = DIA0
-DIM acc as UByte = 0
-DIM nb  as UByte
-DIM pl  as UByte
-DIM d   as UByte
-DIM k   as UByte
-DIM toc as UByte = 20
-DIM rep as UByte = 0
-DIM hp  as UByte = 0
+DIM si as UByte
+DIM mi as UByte
+DIM hi as UByte
+DIM tmp as UInteger
 
+tmp = CAST(UInteger, T0 MOD 60) * 5
+si = CAST(UByte, tmp MOD 75)
+
+tmp = CAST(UInteger, (T0 / 60) MOD 60)
+mi = CAST(UByte, (tmp * 75 / 60) MOD 75)
+
+tmp = CAST(UInteger, (T0 / 3600) MOD 12)
+hi = CAST(UByte, (tmp * 75 / 12) MOD 75)
+
+DIM km as UByte = 0
+DIM kh as UByte = 0
+DIM old as UByte          ' unico temporal para posicion anterior
+
+DIM dia as UByte = DIA0
+DIM frames as UByte = 0
+DIM toc as UByte = 20
+DIM beepLeft as UByte = 0
 
   BORDER 0 : PAPER 0 : INK 6 : BRIGHT 1 : OVER 0 : INVERSE 0 : CLS
 
   MemSet(23200, 207, 32)
-  FOR k = 0 TO TITLE_LEN - 1 : putRom(21, 9 + k, tTitle(k)) : NEXT k
+  FOR i = 0 TO TITLE_LEN - 1 : putRom(21, 9 + i, tTitle(i)) : NEXT i
+  FOR i = 0 TO 15 : putRom(8, 8 + i, tOyster(i)) : NEXT i
+  FOR i = 0 TO 7  : putRom(13, 12 + i, tDate(i)) : NEXT i
 
-  FOR k = 0 TO 15 : putRom(8, 8 + k, tOyster(k)) : NEXT k
-  FOR k = 0 TO 7  : putRom(13, 12 + k, tDate(k)) : NEXT k
-
-FOR h = 0 TO 16
-  MemSet(ad + 16 - aw(h), 78, CAST(UInteger, aw(h)) * 2)
-  ad = ad + 32
-NEXT h
-
-PAPER 8
-
-CIRCLE cx, cy, rOuter
-CIRCLE cx, cy, rOuter - 5
-
-drawFace()
-drawDate(dia)
-
-' Tabla de agujas (Fixed)
-sd = SIN(PI / 150.0)
-cd = COS(PI / 150.0)
-sn = 0
-cs = 1
-
-FOR i = 0 TO 74
-  off = CAST(UInteger, i)
-  FOR h = 0 TO 2
-    x = CAST(Byte, rr(h) * sn + 0.5)
-    y = CAST(Byte, rr(h) * cs + 0.5)
-    ax(off)       =  x : ax(off + 75)  =  y
-    ax(off + 150) = -x : ax(off + 225) = -y
-    ax(off + 300) =  x
-    off = off + 375
+  FOR h = 0 TO 16
+    MemSet(ad + 16 - aw(h), 78, CAST(UInteger, aw(h)) * 2)
+    ad = ad + 32
   NEXT h
-  ang = sn * cd + cs * sd
-  cs  = cs * cd - sn * sd
-  sn  = ang
-NEXT i
 
-OVER 1
+  PAPER 8
+  CIRCLE cx, cy, rOuter
+  CIRCLE cx, cy, rOuter - 5
+  drawFace()
+  drawDate(dia)
 
-PLOT cx, cy : DRAW ax(hi), ax(hi + 75)
-PLOT cx, cy : DRAW ax(mi), ax(mi + 75)
-PLOT cx, cy : DRAW ax(si), ax(si + 75)
+  ' Generar tabla reducida
+  sd = SIN(PI / 150.0)
+  cd = COS(PI / 150.0)
+  sn = 0
+  cs = 1
 
-pl = PEEK(23672)
+  FOR i = 0 TO 74
+    ax(i)       = CAST(Byte, rHora * sn + 0.5)
+    ax(i + 75)  = CAST(Byte, rHora * cs + 0.5)
+    ax(i + 150) = CAST(Byte, rMin  * sn + 0.5)
+    ax(i + 225) = CAST(Byte, rMin  * cs + 0.5)
+    ax(i + 300) = CAST(Byte, rSec  * sn + 0.5)
+    ax(i + 375) = CAST(Byte, rSec  * cs + 0.5)
+
+    ang = sn * cd + cs * sd
+    cs  = cs * cd - sn * sd
+    sn  = ang
+  NEXT i
+
+  OVER 1
+
+  PLOT cx, cy : DRAW ax(hi), ax(hi + 75)
+  PLOT cx, cy : DRAW ax(mi + 150), ax(mi + 225)
+  PLOT cx, cy : DRAW ax(si + 300), ax(si + 375)
 
 DO
   ASM
@@ -261,64 +245,62 @@ DO
 
   IF ((IN 254) BAND 31) <> 31 THEN EXIT DO
 
-  nb = PEEK(23672)
-  d = nb - pl
-  pl = nb
-  acc = acc + d
+  frames = frames + 1
 
-  WHILE acc >= UMBRAL
-    acc = acc - UMBRAL
+  ' Apaga el beep cuando termina
+  IF beepLeft <> 0 THEN
+    beepLeft = beepLeft - 1
+    IF beepLeft = 0 THEN OUT 254, 0
+  END IF
 
-    oi = si
+  IF (frames BAND 7) = 0 THEN
+
+    ' Segundos
+    old = si
     si = si + 1
-    IF si = 1050 THEN si = 750
-    PLOT cx, cy : DRAW ax(si), ax(si + 75)
-    PLOT cx, cy : DRAW ax(oi), ax(oi + 75)
+    IF si = 75 THEN si = 0
+    PLOT cx, cy : DRAW ax(si + 300), ax(si + 375)
+    PLOT cx, cy : DRAW ax(old + 300), ax(old + 375)
 
-    IF rep <> 0 THEN
-      PLOT cx, cy : DRAW ax(hi), ax(hi + 75)
-      rep = 0
-    END IF
-
+    ' Minutos
     km = km + 1
     IF km = 60 THEN
       km = 0
-      om = mi
+      old = mi
       mi = mi + 1
-      IF mi = 675 THEN mi = 375
-      PLOT cx, cy : DRAW ax(mi), ax(mi + 75)
-      IF hp = 1 AND om = hi + 375 THEN
-        PLOT cx + ax(hi), cy + ax(hi + 75) + 1
-        DRAW ax(om) - ax(hi), ax(om + 75) - ax(hi + 75) - 1
-        hp = 0
-      ELSE
-        PLOT cx, cy : DRAW ax(om), ax(om + 75)
-      END IF
+      IF mi = 75 THEN mi = 0
 
+      ' Horas
       kh = kh + 1
       IF kh = 12 THEN
         kh = 0
-        oh = hi
+        old = hi
         hi = hi + 1
-        IF hi = 300 THEN
+        IF hi = 75 THEN
           hi = 0
-          pm = 1 - pm
-          IF pm = 0 THEN
-            IF dia = DIASMES THEN dia = 1 ELSE dia = dia + 1
-            drawDate(dia)
-          END IF
-          rep = 1 : hp = 1
+          IF dia = DIASMES THEN dia = 1 ELSE dia = dia + 1
+          drawDate(dia)
         END IF
         PLOT cx, cy : DRAW ax(hi), ax(hi + 75)
-        PLOT cx, cy : DRAW ax(oh), ax(oh + 75)
+        PLOT cx, cy : DRAW ax(old), ax(old + 75)
       END IF
+
+      PLOT cx, cy : DRAW ax(mi + 150), ax(mi + 225)
+      PLOT cx, cy : DRAW ax(old + 150), ax(old + 225)
     END IF
 
+    ' Tic-tac calibrado para sonar parecido al FOR original
+    ' Original alternaba ~20 y ~45 iteraciones de bucle vacio.
+    ' Aqui usamos 1 frame (~20 ms) y 2 frames (~40 ms).
     OUT 254, 16
-    FOR k = 1 TO toc : NEXT k
-    OUT 254, 0
-    toc = 65 - toc
-  END WHILE
+    IF toc = 20 THEN
+      beepLeft = 1
+      toc = 45
+    ELSE
+      beepLeft = 2
+      toc = 20
+    END IF
+  END IF
 LOOP
 
 BORDER 7 : PAPER 7 : INK 0 : BRIGHT 0 : OVER 0 : INVERSE 0

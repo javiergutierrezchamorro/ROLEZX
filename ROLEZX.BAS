@@ -6,10 +6,10 @@
 '   - Tabla agujas 450 bytes (solo x,y positivos)
 '   - Indices 0..74 unificados
 '   - Variables temporales reducidas (old)
-'   - bigChar sin IF b<>0
-'   - Inicializacion de hora precalculada (T0 constante)
+'   - bigChar sin IF b<>0 + direccion unica
+'   - Hora inicial 10:09:00 correcta (si=0, mi=11, hi=63)
+'   - Fixed del arranque declaradas locales al bloque
 '   - Tic-tac por frames calibrado
-'   - Codigo de arranque y bucle principal limpio
 '
 '  Compilar: zxbc -O3 -W 150 -W 160 -W 170 -W 190 -f tap -o rolezx.tap rolezx.bas
 ' ************************************************************
@@ -136,11 +136,6 @@ DIM ax(449) as Byte AT 49152
 
 DIM i as UByte
 DIM h as UByte
-DIM sn as Fixed
-DIM cs as Fixed
-DIM sd as Fixed
-DIM cd as Fixed
-DIM ang as Fixed
 
 DIM aw(16) as UByte = {3, 5, 6, 7, 7, 8, 8, 8, 8, 8, 8, 8, 7, 7, 6, 4, 2}
 DIM ad as UInteger = 22592
@@ -149,10 +144,13 @@ DIM tTitle(13) as UByte = {82, 79, 76, 69, 90, 88, 32, 98, 121, 32, 71, 117, 116
 DIM tOyster(15) as UByte = {79, 89, 83, 84, 69, 82, 32, 80, 69, 82, 80, 69, 84, 85, 65, 76}
 DIM tDate(7) as UByte = {68, 65, 84, 69, 74, 85, 83, 84}
 
-' 10:09:00 precalculado (T0=36540)
-DIM si as UByte = 45          ' (0*5) MOD 75  → segundos en 0, pero *5 da resolucion
-DIM mi as UByte = 11          ' ~9 min
-DIM hi as UByte = 62          ' ~10 h
+' 10:09:00 exacto con 75 pasos/vuelta
+' Hora:   10h * (75/12) + 9min * (75/12/60) ≈ 62.5 + 0.94 ≈ 63
+' Minuto: 9 * (75/60) = 11.25 ≈ 11
+' Segundo: 0
+DIM si as UByte = 0
+DIM mi as UByte = 11
+DIM hi as UByte = 63
 
 DIM km as UByte = 0
 DIM kh as UByte = 0
@@ -180,11 +178,13 @@ DIM beepLeft as UByte = 0
   drawFace()
   drawDate(dia)
 
-  ' Tabla de agujas
-  sd = SIN(PI / 150.0)
-  cd = COS(PI / 150.0)
-  sn = 0
-  cs = 1
+  ' Tabla de agujas (variables Fixed locales al bloque)
+  DIM sn as Fixed = 0
+  DIM cs as Fixed = 1
+  DIM sd as Fixed = SIN(PI / 150.0)
+  DIM cd as Fixed = COS(PI / 150.0)
+  DIM ang as Fixed
+
   FOR i = 0 TO 74
     ax(i)       = CAST(Byte, rHora * sn + 0.5)
     ax(i + 75)  = CAST(Byte, rHora * cs + 0.5)

@@ -1,7 +1,73 @@
 ' ************************************************************
-'  ROLEZX v33 - Reloj analogico estilo Rolex Datejust
+'  ROLEZX v35 - Reloj analogico estilo Rolex Datejust
 '  (Boriel ZX BASIC para ZX Spectrum 48K, 50 Hz)
 ' ************************************************************
+'  v35 - Invariantes de bucle (estudio del codigo generado):
+'  solo cambia codigo de INICIALIZACION (el tick queda byte a byte
+'  identico, diff de asm verificado). 4719 -> 4691 bytes (-28),
+'  0 warnings.
+'   - Tabla de agujas: puntero p corredor (DIM p = AXTAB, p = p + 1
+'     al final del bucle) en vez de AXTAB + i en los 6 POKEs. zxbc
+'     rehacia la direccion desde cero en cada POKE (ld a,(i) +
+'     extension a 16 bits + ld de,C + add hl,de = 11 bytes x 6);
+'     con p: ld hl,(p) + ld de,C + add (8 x 6) + incremento (7).
+'     -13 bytes
+'   - aw(i) se leia 2 veces por iteracion y cada acceso pasaba por
+'     el runtime __ARRAY (tabla de dimensiones + __FMUL16). Ahora
+'     w = aw(i) una sola vez. -7 bytes
+'   - bigChar: a0 + 256 se calculaba 2 veces por rama (la direccion
+'     del POKE y la del PEEK). Ahora a1 = a0 + 256 una vez antes
+'     del IF. -6 bytes
+'   - putRom: punteros corredores (POKE base, PEEK src / base =
+'     base + 256, src = src + 1) en vez de base + (k SHL 8). El SHL
+'     8 de zxbc NO es ld h,a / ld l,0: es un bucle de 8 add hl,hl /
+'     djnz (~199T) por POKE. -2 bytes y mas rapido
+'   - DESCARTADOS por medidos PEORES (aislados sobre v34):
+'     hoistear NPOS - 1 en una variable (+2: con CONST el optimi-
+'     zador lo plega y el limite ya es el inmediato ld a,74; el
+'     FOR no reevalua nada); drawHand con a0 = AXTAB + t (+7 y mas
+'     lento: el store/load del local cuesta mas que la suma que
+'     ahorra); drawDate con am = a - 1 / ap = a + 4 (+19: ya van
+'     inline como dec hl / add hl,de, mas baratos que variables);
+'     k * 256 en putRom (+1: genera call __MUL16_FAST, peor que el
+'     propio bucle de desplazamiento)
+'   - REGLA practica: en zxbc solo compensa hoistear una LLAMADA
+'     duplicada (__ARRAY) o una direccion LARGA de recalcular; las
+'     sumas cortas (x+C, x-C) ya van inline y hoistearlas paga el
+'     trafico de la variable (19T por byte en locales de pila)
+'   - BONUS (cuestion pendiente): FOR i as UByte = N TO 0 STEP -1
+'     es un bucle INFINITO silencioso en zxbc 1.18.7: el test de
+'     salida es "i < 0" en SIN SIGNO (cp 0 / sbc a,a = siempre 0) y
+'     -O4 lo elimina sin aviso. Con Byte termina pero llama a
+'     __LTI8 en cada iteracion (~102T de mecanica vs 70T del
+'     ascendente). Los bucles invertidos NO son mas rapidos en
+'     Boriel; cuenta atras rapida = DO ... i = i - 1 :
+'     LOOP UNTIL i = 255 (63T de mecanica)
+'
+'  v34 - Bug REAL de geometria corregido + inicializacion mas
+'  compacta (4860 -> 4719 bytes de TAP, 0 warnings):
+'   - BUG (desde v30): el paso angular de la tabla de agujas era
+'     PI/150 = 1.2 grados/indice, asi que 75 indices solo cubrian
+'     88.8 grados: las agujas quedaban encerradas en el cuadrante
+'     12h-3h (por eso la tabla tenia "solo x,y positivos") y la
+'     aguja volvia a saltar a 12h al envolver el indice. El diseno
+'     pide una vuelta COMPLETA en 75 indices: si envuelve en 75
+'     justo cuando secSteps llega a 60 (segundero = 1 vuelta por
+'     minuto; minutero = 75 pasos/hora; horario = 75 pasos/12h).
+'     Paso correcto: 2*PI/75 = 4.8 grados. Con el fix la pose
+'     inicial hi=63/mi=11/si=0 queda en ~10:09, la clasica de
+'     reloj. Coste del fix: 0 bytes (en el binario solo cambian
+'     las 2 constantes trigonometricas plegadas; cmp verificado).
+'     Evidencia grafica: rolezx_v34_tabla.png
+'   - putRom: bucle k = 0..7 en vez de 8 POKEs desenrollados.
+'     Es codigo de inicializacion: mismo resultado, -105 bytes
+'   - Marca "ROLEZX": tabla tBrand(5) + bucle en vez de 6 bigChar
+'     desenrollados (-16 bytes)
+'   - Corona: tablas crownOff/crownLen + bucle en vez de 5
+'     PLOT/DRAW desenrollados (-20 bytes)
+'   - Descartado: -H 0 (sin strings el heap no cuesta bytes de
+'     TAP: 0 de ahorro)
+'
 '  v33 - PEEK/POKE tipado y CONST (mismo comportamiento, menos codigo):
 '   - ax() fuera: la tabla se accede con PEEK/POKE tipados. ax(t)
 '     llamaba al runtime generico __ARRAY (lee tabla de dimensiones,
@@ -112,17 +178,23 @@ SUB fillMem(a as UInteger, v as UByte, n as UByte)
   NEXT j
 END SUB
 
+' v35: punteros corredores (POKE base, PEEK src y base = base +
+' 256, src = src + 1) en vez de base + (k SHL 8): el SHL 8 de zxbc
+' es un bucle de 8 add hl,hl / djnz (~199T) por POKE, no el
+' ld h,a / ld l,0 de un Z80 a mano. (k * 256 seria peor aun:
+' call __MUL16_FAST. Medido: +1 byte.)
+' v34: bucle k = 0..7 en vez de 8 POKEs desenrollados. Es codigo de
+' inicializacion (3 textos al arrancar): el bucle ahorra 105 bytes
+' y el tiempo de ejecucion es irrelevante aqui.
 SUB putRom(r as UByte, c as UByte, ch as UByte)
   DIM src as UInteger = 15360 + (CAST(UInteger, ch) SHL 3)
   DIM base as UInteger = 16384 + (CAST(UInteger, r SHR 3) SHL 11) + (CAST(UInteger, r BAND 7) SHL 5) + c
-  POKE base,        PEEK(src)
-  POKE base + 256,  PEEK(src + 1)
-  POKE base + 512,  PEEK(src + 2)
-  POKE base + 768,  PEEK(src + 3)
-  POKE base + 1024, PEEK(src + 4)
-  POKE base + 1280, PEEK(src + 5)
-  POKE base + 1536, PEEK(src + 6)
-  POKE base + 1792, PEEK(src + 7)
+  DIM k as UByte
+  FOR k = 0 TO 7
+    POKE base, PEEK(src)
+    base = base + 256
+    src = src + 1
+  NEXT k
 END SUB
 
 SUB bigChar(x as UByte, yt as UByte, ch as UByte, opv as UByte)
@@ -130,20 +202,24 @@ SUB bigChar(x as UByte, yt as UByte, ch as UByte, opv as UByte)
   DIM b as UByte
   DIM src as UInteger = 15360 + (CAST(UInteger, ch) SHL 3)
   DIM a0 as UInteger
+  DIM a1 as UInteger
   DIM m as UInteger
 
   ' Un solo bucle con la operacion dentro: bigChar solo se ejecuta
-  ' al inicializar y al cambiar la fecha (no es codigo caliente)
+  ' al inicializar y al cambiar la fecha (no es codigo caliente).
+  ' v35: a1 = a0 + 256 una sola vez (antes se calculaba 2 veces por
+  ' rama: la direccion del POKE y la del PEEK)
   FOR r = 0 TO 7
     b  = PEEK(src + r)
     a0 = scrAddr(yt + (r SHL 1), x)
     m  = CAST(UInteger, exn(b SHR 4)) + (CAST(UInteger, exn(b BAND 0x0F)) SHL 8)
+    a1 = a0 + 256
     IF opv = 0 THEN
-      POKE uinteger a0,       PEEK(uinteger, a0)       BOR m
-      POKE uinteger a0 + 256, PEEK(uinteger, a0 + 256) BOR m
+      POKE uinteger a0, PEEK(uinteger, a0) BOR m
+      POKE uinteger a1, PEEK(uinteger, a1) BOR m
     ELSE
-      POKE uinteger a0,       PEEK(uinteger, a0)       BXOR m
-      POKE uinteger a0 + 256, PEEK(uinteger, a0 + 256) BXOR m
+      POKE uinteger a0, PEEK(uinteger, a0) BXOR m
+      POKE uinteger a1, PEEK(uinteger, a1) BXOR m
     END IF
   NEXT r
 END SUB
@@ -165,6 +241,13 @@ SUB drawDate(n as UByte)
   END IF
 END SUB
 
+' v34: datos de la marca y de la corona (antes: llamadas y
+' PLOT/DRAW desenrollados).
+DIM tBrand(5) as UByte = {82, 79, 76, 69, 90, 88}
+
+DIM crownOff(4) as UByte = {0, 3, 6, 9, 12}
+DIM crownLen(4) as UByte = {4, 5, 7, 5, 4}
+
 SUB drawFace()
   DIM n as UByte
   DIM q as Byte
@@ -175,6 +258,7 @@ SUB drawFace()
   DIM c as Fixed = 1
   DIM sa as Fixed = CAST(Fixed, SIN(PI / 30.0))
   DIM ca as Fixed = CAST(Fixed, COS(PI / 30.0))
+  DIM i as UByte
 
   FOR n = 0 TO 59
     PLOT cx + 0.5 + (rOuter - 2) * s, cy + 0.5 + (rOuter - 2) * c
@@ -200,19 +284,16 @@ SUB drawFace()
     s = a
   NEXT n
 
-  PLOT cx - 6, cy + 46 : DRAW 0, 4
-  PLOT cx - 3, cy + 46 : DRAW 0, 5
-  PLOT cx    , cy + 46 : DRAW 0, 7
-  PLOT cx + 3, cy + 46 : DRAW 0, 5
-  PLOT cx + 6, cy + 46 : DRAW 0, 4
+  ' Corona (v34): 5 trazos verticales con datos + el puente
+  ' horizontal
+  FOR i = 0 TO 4
+    PLOT cx - 6 + crownOff(i), cy + 46 : DRAW 0, crownLen(i)
+  NEXT i
   PLOT cx - 6, cy + 46 : DRAW 12, 0
 
-  bigChar(BRAND_X0,      BRAND_Y, 82, 0)
-  bigChar(BRAND_X0 + 16, BRAND_Y, 79, 0)
-  bigChar(BRAND_X0 + 32, BRAND_Y, 76, 0)
-  bigChar(BRAND_X0 + 48, BRAND_Y, 69, 0)
-  bigChar(BRAND_X0 + 64, BRAND_Y, 90, 0)
-  bigChar(BRAND_X0 + 80, BRAND_Y, 88, 0)
+  FOR i = 0 TO 5
+    bigChar(BRAND_X0 + (i SHL 4), BRAND_Y, tBrand(i), 0)
+  NEXT i
 
   CIRCLE cx, cy, 3
 END SUB
@@ -224,6 +305,9 @@ END SUB
 ' FASTCALL estaria genial (param en registros) pero esta ROTO en
 ' zxbc 1.18.7: el llamador usa la convencion de registros y el
 ' cuerpo sigue leyendo la pila -> valor corrupto. No usar.
+' v35: NO hoistar AXTAB + t aqui (a0 = AXTAB + t): medido +7 bytes
+' y mas lento; el store/load del local cuesta mas de lo que ahorra
+' la suma plegada AXTAB + NPOS = 49227.
 SUB drawHand(pos as UByte, offset as UInteger)
   DIM t as UInteger
   t = pos + offset
@@ -254,10 +338,14 @@ DIM secSteps as UByte = 0
   FOR i = 0 TO 15 : putRom(OYSTER_ROW, OYSTER_COL + i, tOyster(i)) : NEXT i
   FOR i = 0 TO 7  : putRom(DATEJ_ROW, DATEJ_COL + i, tDate(i)) : NEXT i
 
+  ' v35: w = aw(i) una sola vez (antes aw(i) pasaba 2 veces por el
+  ' runtime __ARRAY en la misma iteracion: argumento y ancho)
   DIM aw(16) as UByte = {3, 5, 6, 7, 7, 8, 8, 8, 8, 8, 8, 8, 7, 7, 6, 4, 2}
   DIM ad as UInteger = 22592
+  DIM w as UByte
   FOR i = 0 TO 16
-    fillMem(ad + 16 - aw(i), 78, CAST(UByte, aw(i) SHL 1))
+    w = aw(i)
+    fillMem(ad + 16 - w, 78, CAST(UByte, w SHL 1))
     ad = ad + 32
   NEXT i
 
@@ -271,23 +359,32 @@ DIM secSteps as UByte = 0
   ' CAST(Byte, INT(...)): INT() se fusiona inline a coste cero y
   ' preserva el redondeo del original; la variable Integer tmp
   ' desaparece.
+  ' v34 BUGFIX: paso angular 2*PI/75 (4.8 grados/indice) = vuelta
+  ' COMPLETA en NPOS indices. El PI/150 original (1.2 grados) dejaba
+  ' los 75 indices encerrados en 88.8 grados de arco.
+  ' v35: puntero p corredor en vez de AXTAB + i en los 6 POKEs: zxbc
+  ' recargaba i, lo extendia a 16 bits y sumaba la constante en cada
+  ' POKE (11 bytes x 6); con p la direccion base se carga una vez
+  ' (ld hl,(p)) y solo queda la suma del offset del bloque. -13 bytes
+  DIM p As UInteger = AXTAB
   DIM sn as Fixed = 0
   DIM cs as Fixed = 1
-  DIM sd as Fixed = CAST(Fixed, SIN(PI / 150.0))
-  DIM cd as Fixed = CAST(Fixed, COS(PI / 150.0))
+  DIM sd as Fixed = CAST(Fixed, SIN(2.0 * PI / 75.0))
+  DIM cd as Fixed = CAST(Fixed, COS(2.0 * PI / 75.0))
   DIM ang as Fixed
 
   FOR i = 0 TO NPOS - 1
-    POKE AXTAB + i + OFF_HORA,        CAST(Byte, INT(rHora * sn + 0.5))
-    POKE AXTAB + i + OFF_HORA + NPOS, CAST(Byte, INT(rHora * cs + 0.5))
-    POKE AXTAB + i + OFF_MIN,         CAST(Byte, INT(rMin  * sn + 0.5))
-    POKE AXTAB + i + OFF_MIN + NPOS,  CAST(Byte, INT(rMin  * cs + 0.5))
-    POKE AXTAB + i + OFF_SEC,         CAST(Byte, INT(rSec  * sn + 0.5))
-    POKE AXTAB + i + OFF_SEC + NPOS,  CAST(Byte, INT(rSec  * cs + 0.5))
+    POKE p + OFF_HORA,        CAST(Byte, INT(rHora * sn + 0.5))
+    POKE p + OFF_HORA + NPOS, CAST(Byte, INT(rHora * cs + 0.5))
+    POKE p + OFF_MIN,         CAST(Byte, INT(rMin  * sn + 0.5))
+    POKE p + OFF_MIN + NPOS,  CAST(Byte, INT(rMin  * cs + 0.5))
+    POKE p + OFF_SEC,         CAST(Byte, INT(rSec  * sn + 0.5))
+    POKE p + OFF_SEC + NPOS,  CAST(Byte, INT(rSec  * cs + 0.5))
 
     ang = sn * cd + cs * sd
     cs  = cs * cd - sn * sd
     sn  = ang
+    p = p + 1
   NEXT i
 
   OVER 1
